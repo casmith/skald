@@ -14,9 +14,10 @@ EIKTHYR, ELDER = "defeated_eikthyr", "defeated_gdking"
 
 def test_a_key_is_read_as_its_length_byte_says(tracker):
     """A greedy match would run past the key into whatever follows it."""
-    keys, world_time = app.db2_world(world_save([EIKTHYR, "killedtroll"], 999.5))
+    keys, world_time, version = app.db2_world(world_save([EIKTHYR, "killedtroll"], 999.5))
     assert keys == {EIKTHYR, "killedtroll"}
     assert world_time == 999.5
+    assert version == 41  # the format these fixtures are written in
 
 
 def test_text_that_merely_looks_like_a_key_is_ignored(tracker):
@@ -24,7 +25,7 @@ def test_text_that_merely_looks_like_a_key_is_ignored(tracker):
     import struct
     body = b"xx" + b"defeated_fake" + bytes([5]) + b"killedbat"
     blob = gzip.compress(body)
-    keys, _ = app.db2_world(struct.pack("<idi", 41, 0.0, len(blob)) + blob)
+    keys, _, _ = app.db2_world(struct.pack("<idi", 41, 0.0, len(blob)) + blob)
     assert keys == set()
 
 
@@ -108,3 +109,24 @@ def test_bosses_unlock_biomes(tracker):
     app.scan_saves()
     assert "Swamp" in app.unlocked_biomes(h, WORLD)
     assert "Mountain" not in app.unlocked_biomes(h, WORLD)
+
+
+def test_a_save_format_skald_has_not_seen_is_read_anyway(tracker, capsys):
+    """The header has not moved in a long time. Read it, and say so."""
+    import gzip
+    import struct
+
+    body = b"x" + bytes([len(EIKTHYR)]) + EIKTHYR.encode()
+    blob = gzip.compress(body)
+    future = struct.pack("<idi", 99, 4242.0, len(blob)) + blob
+    d = tracker.dirs["saves"] / WORLD / "worlds_local" / WORLD
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "_main.5.db2").write_bytes(future)
+    (d / "_main.5.ok").write_text("ok")
+    app.scan_saves()
+
+    assert "format 99" in capsys.readouterr().out
+    state = app.load_milestones()[WORLD]
+    assert state["save"]["version"] == 99
+    assert state["save"]["world_time"] == 4242.0   # still usable
+    assert EIKTHYR in state["live"]

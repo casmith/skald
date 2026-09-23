@@ -119,6 +119,22 @@ it exists and can be read, every world with whether its events, saves and
 backups are arriving, and where each setting came from (file, which variable,
 or the default). `/api/diagnostics` returns the same as JSON.
 
+## Keeping up with Valheim
+
+Skald reads files and log lines the game owns, and the game changes. Rather
+than fail quietly when it does, Skald records what it met and shows it on
+`/diagnostics`:
+
+- **The game version** each server reports (free, from its status endpoint),
+  marked against the versions Skald's weather tables and log patterns were
+  checked with.
+- **The save format's version number**, marked against the ones it knows. An
+  unfamiliar one is still read — that header has not moved in years — but it
+  says so rather than pretending.
+- **Lines carrying the game's timestamp that matched nothing Skald knows.**
+  If an update rewords a line, this number climbs, which is the difference
+  between "something is missing" and "everything looks fine".
+
 ## Permissions
 
 Skald runs as an unprivileged user (uid 10001). It only writes to two places:

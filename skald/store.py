@@ -58,6 +58,13 @@ SCHEMA = [
 
     CREATE TABLE meta (k TEXT PRIMARY KEY, v TEXT);
     """,
+    # v2: what Skald met but did not understand -- the save format's version
+    # number, and lines that look like the game's but match no known pattern.
+    # Valheim updates change both, and silence is the wrong way to find out.
+    """
+    ALTER TABLE saves ADD COLUMN save_version INTEGER;
+    ALTER TABLE files ADD COLUMN skipped INTEGER NOT NULL DEFAULT 0;
+    """,
 ]
 
 
@@ -83,11 +90,13 @@ def migrate(conn):
     return conn.execute("PRAGMA user_version").fetchone()[0]
 
 
-def ingest(conn, path, world, parse_line):
+def ingest(conn, path, world, parse_line, is_log_line=None):
     """Read a file's new lines into `events`. Returns how many were added.
 
-    `parse_line` is the caller's parser: it returns (ts, prio, kind, args,
-    line) for a line worth keeping, or None.
+    `parse_line` returns (ts, prio, kind, args, line) for a line worth
+    keeping, or None. `is_log_line` says whether a line the parser rejected
+    still looked like the game talking: those are counted, because a Valheim
+    update that rewords a line would otherwise just go quiet.
     """
     try:
         st = os.stat(path)
@@ -109,20 +118,24 @@ def ingest(conn, path, world, parse_line):
     except OSError:
         return 0
     consumed = text.rfind("\n") + 1
-    rows = []
+    rows, skipped = [], 0
     for line in text[:consumed].splitlines():
         ev = parse_line(line)
         if ev:
             ts, prio, kind, args, clean = ev
             rows.append((world, clean, ts, prio, kind, json.dumps(list(args))))
+        elif is_log_line and is_log_line(line):
+            skipped += 1
     with conn:
         before = conn.total_changes
         conn.executemany(
             "INSERT OR IGNORE INTO events (world, line, ts, prio, kind, args)"
             " VALUES (?, ?, ?, ?, ?, ?)", rows)
-        conn.execute("INSERT INTO files (path, size, mtime) VALUES (?, ?, ?)"
-                     " ON CONFLICT(path) DO UPDATE SET size = ?, mtime = ?",
-                     (path, start + consumed, st.st_mtime, start + consumed, st.st_mtime))
+        conn.execute("INSERT INTO files (path, size, mtime, skipped) VALUES (?, ?, ?, ?)"
+                     " ON CONFLICT(path) DO UPDATE SET size = ?, mtime = ?,"
+                     " skipped = skipped + ?",
+                     (path, start + consumed, st.st_mtime, skipped,
+                      start + consumed, st.st_mtime, skipped))
         return conn.total_changes - before - 1
 
 
@@ -145,6 +158,12 @@ def add_event(conn, world, line, ts, prio, kind, args):
             (world, line, ts, prio, kind, json.dumps(list(args))))
 
 
+def skipped_lines(conn):
+    """Lines that looked like the game's but matched nothing, per file."""
+    return {row["path"]: row["skipped"] for row in
+            conn.execute("SELECT path, skipped FROM files WHERE skipped > 0")}
+
+
 def state(conn):
     """Milestone and save state, in the shape the rest of the code expects."""
     out = {}
@@ -152,6 +171,7 @@ def state(conn):
         out[row["world"]] = {
             "save": {"last": row["name"], "last_ts": row["ts"],
                      "world_time": row["world_time"],
+                     "version": row["save_version"],
                      "keys": json.loads(row["keys"]) if row["keys"] else None},
             "last": row["backup"] or "", "last_ts": row["backup_ts"],
             "live": {}, "milestones": {},
@@ -172,13 +192,15 @@ def put_milestone(conn, world, key, after, by, source):
             " VALUES (?, ?, ?, ?, ?)", (world, key, after, by, source))
 
 
-def put_save(conn, world, name, ts, world_time, keys):
+def put_save(conn, world, name, ts, world_time, keys, save_version=None):
     with conn:
         conn.execute(
-            "INSERT INTO saves (world, name, ts, world_time, keys) VALUES (?, ?, ?, ?, ?)"
-            " ON CONFLICT(world) DO UPDATE SET name = ?, ts = ?, world_time = ?, keys = ?",
-            (world, name, ts, world_time, json.dumps(keys),
-             name, ts, world_time, json.dumps(keys)))
+            "INSERT INTO saves (world, name, ts, world_time, keys, save_version)"
+            " VALUES (?, ?, ?, ?, ?, ?)"
+            " ON CONFLICT(world) DO UPDATE SET name = ?, ts = ?, world_time = ?,"
+            " keys = ?, save_version = ?",
+            (world, name, ts, world_time, json.dumps(keys), save_version,
+             name, ts, world_time, json.dumps(keys), save_version))
 
 
 def put_backup(conn, world, name, ts):

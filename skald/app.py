@@ -120,6 +120,15 @@ BACKUP_NAME_RE = re.compile(r"worlds-(\d{8})-(\d{6})\.zip$")
 # follows -- and must then be a whole key, which rules out stray substrings.
 GLOBAL_KEY_RE = re.compile(rb"[\x01-\x7f](?=defeated|killed|bosshildir)")
 MILESTONE_KEY_RE = re.compile(r"^(?:defeated|killed|bosshildir)[a-z0-9_]*$")
+# Valheim moves, and Skald reads files it does not own. Rather than pretend
+# otherwise, it records what it met and says so on /diagnostics: the save
+# format's version number, the game version the servers report, and lines
+# that look like the game talking but match nothing Skald knows.
+KNOWN_SAVE_VERSIONS = (41,)
+# The game versions the weather tables and log patterns were checked against.
+VERIFIED_GAME_VERSIONS = ("1.0",)
+# The status endpoint's keywords carry the game version: "g=1.0.15,n=40,m="
+GAME_VERSION_RE = re.compile(r"\bg=([0-9][0-9.]*)")
 MILESTONES = {
     # key: (label, kind). Unknown keys still show, with a generated label.
     "defeated_eikthyr": ("Eikthyr defeated", "boss"),
@@ -233,6 +242,11 @@ def db():
         return _DB
 
 
+def looks_like_log(line):
+    """A line with the game's own timestamp on it, whatever it then says."""
+    return TS_RE.search(line) is not None
+
+
 def ingest_events():
     """Take in whatever the hook has written since last time.
 
@@ -242,7 +256,7 @@ def ingest_events():
     added = 0
     for path in event_paths():
         world = os.path.basename(path).split(".", 1)[0]
-        added += store.ingest(db(), path, world, parse_line)
+        added += store.ingest(db(), path, world, parse_line, looks_like_log)
     return added
 
 
@@ -382,6 +396,8 @@ def poll_once():
             st["status_ts"] = datetime.fromisoformat(
                 data["last_status_update"]).timestamp()
             st["error"] = data.get("error")
+            found = GAME_VERSION_RE.search(data.get("keywords") or "")
+            st["game_version"] = found.group(1) if found else None
             # The updater keeps rewriting status.json while the game is down,
             # with `error` set -- so a fresh file is not by itself "up".
             fresh = time.time() - st["status_ts"] < 300
@@ -425,16 +441,16 @@ def poller():
 
 
 def db2_world(b):
-    """(milestone keys, world clock in seconds) from a world save (.db2)."""
+    """(keys, world clock, save format version) from a world save (.db2)."""
     # int version, double world time, then the gzip body behind its length.
-    _, world_time, ln = struct.unpack_from("<idi", b, 0)
+    version, world_time, ln = struct.unpack_from("<idi", b, 0)
     raw = gzip.decompress(b[16:16 + ln])
     keys = set()
     for m in GLOBAL_KEY_RE.finditer(raw):
         key = raw[m.start() + 1:m.start() + 1 + raw[m.start()]].decode("latin-1")
         if MILESTONE_KEY_RE.match(key):
             keys.add(key)
-    return keys, world_time
+    return keys, world_time, version
 
 
 def backup_global_keys(path, world):
@@ -521,7 +537,14 @@ def scan_saves():
             if name == sv["last"] and done == sv["last_ts"]:
                 continue
             with open(db2_path, "rb") as f:
-                keys, world_time = db2_world(f.read())
+                keys, world_time, save_version = db2_world(f.read())
+            if save_version not in KNOWN_SAVE_VERSIONS:
+                # Newer than anything Skald has been shown. The header has
+                # not moved in a long time, so read it anyway -- but say so.
+                print(f"note: {world}'s save is format {save_version}, which this "
+                      f"version of skald has not seen (known: "
+                      f"{', '.join(map(str, KNOWN_SAVE_VERSIONS))}). See /diagnostics.",
+                      flush=True)
         except Exception as e:
             # Mid-save or rolled over under us: try again next minute.
             print(f"milestones: {world} save unreadable, retrying: {e}", flush=True)
@@ -538,7 +561,7 @@ def scan_saves():
         else:
             for k in keys - set(sv["keys"]) - set(live):
                 store.put_milestone(db(), world, k, sv["last_ts"], done, "save")
-        store.put_save(db(), world, name, done, world_time, sorted(keys))
+        store.put_save(db(), world, name, done, world_time, sorted(keys), save_version)
 
 
 def milestone_poller():
@@ -1434,6 +1457,7 @@ def diagnostics(h, now):
         evs = [e for e in h["sessions"] if e["world"] == name]
         st = status.get(name, {})
         save = state.get(name, {}).get("save") or {}
+        game_version = st.get("game_version")
         backups = sorted(glob.glob(os.path.join(CONFIG.backups_dir(name), "worlds-*.zip")))
         clock = world_clock(h, name, now)
         worlds.append({
@@ -1443,8 +1467,13 @@ def diagnostics(h, now):
             "status_error": st.get("error"),
             "events_file": {"path": events, "exists": os.path.exists(events),
                             "sessions_seen": len(evs)},
+            "game_version": game_version,
+            "game_version_verified": (game_version or "").startswith(VERIFIED_GAME_VERSIONS),
             "saves": dict(path_info(CONFIG.saves_dir(name)),
                           latest=save.get("last") or None,
+                          version=save.get("version"),
+                          version_known=save.get("version") in KNOWN_SAVE_VERSIONS
+                          if save.get("version") else None,
                           world_clock=round(clock) if clock is not None else None),
             "backups": dict(path_info(CONFIG.backups_dir(name)), count=len(backups),
                             newest=os.path.basename(backups[-1]) if backups else None),
@@ -1466,7 +1495,18 @@ def diagnostics(h, now):
                   "saves_root": path_info(SAVES_ROOT),
                   "backups_root": path_info(BACKUPS_ROOT)},
         "worlds": worlds,
+        "compatibility": {
+            "save_versions_known": list(KNOWN_SAVE_VERSIONS),
+            "game_versions_verified": list(VERIFIED_GAME_VERSIONS),
+            # Lines carrying the game's timestamp that matched no pattern
+            # Skald knows. A Valheim update that rewords one shows up here
+            # rather than as quietly missing data.
+            "unrecognised_lines": sum(store.skipped_lines(db()).values()),
+        },
     }
+
+
+DASH = '<span class="muted">&mdash;</span>'
 
 
 def yes_no(ok, good="yes", bad="no"):
@@ -1484,6 +1524,10 @@ def render_diagnostics(d):
     worlds = []
     for w in d["worlds"]:
         ev, sv, bk = w["events_file"], w["saves"], w["backups"]
+        game = (yes_no(w["game_version_verified"], w["game_version"], w["game_version"])
+                if w["game_version"] else DASH)
+        fmt = (yes_no(sv["version_known"], str(sv["version"]), str(sv["version"]))
+               if sv["version"] else DASH)
         worlds.append(
             f'<tr><td>{html.escape(w["world"])}</td>'
             f'<td>{yes_no(w["status"] == "up", w["status"], w["status"])}</td>'
@@ -1491,7 +1535,8 @@ def render_diagnostics(d):
             f'session{"" if ev["sessions_seen"] == 1 else "s"}</span></td>'
             f'<td>{yes_no(bool(sv["latest"]), sv["latest"] or "none", "none")}</td>'
             f'<td>{yes_no(bk["count"] > 0, str(bk["count"]), "0")}</td>'
-            f'<td>{w["milestones"]}</td><td>{w["biomes_unlocked"]}</td></tr>')
+            f'<td>{w["milestones"]}</td><td>{w["biomes_unlocked"]}</td>'
+            f'<td>{game}</td><td>{fmt}</td></tr>')
     srcs = "".join(f'<tr><td>{html.escape(k)}</td><td class="mono">{html.escape(str(v))}</td></tr>'
                    for k, v in sorted(d["config"]["sources"].items()))
     return (DIAG_PAGE
@@ -1503,6 +1548,11 @@ def render_diagnostics(d):
             .replace("__PATHS__", "\n".join(rows))
             .replace("__WORLDS__", "\n".join(worlds) or
                      '<tr><td colspan="7" class="muted">no worlds configured</td></tr>')
+            .replace("__SAVE_VERSIONS__",
+                     ", ".join(map(str, d["compatibility"]["save_versions_known"])))
+            .replace("__GAME_VERSIONS__",
+                     ", ".join(f'{v}.x' for v in d["compatibility"]["game_versions_verified"]))
+            .replace("__UNKNOWN_LINES__", f'{d["compatibility"]["unrecognised_lines"]:,}')
             .replace("__SOURCES__", srcs))
 
 
@@ -1543,12 +1593,19 @@ __PATHS__
  else it reads.</p>
 <h2>Worlds</h2>
 <div class="wrap"><table><thead><tr><th>World</th><th>Status</th><th>Events</th><th>Latest save</th>
- <th>Backups</th><th>Milestones</th><th>Biomes</th></tr></thead><tbody>
+ <th>Backups</th><th>Milestones</th><th>Biomes</th><th>Game</th><th>Save fmt</th>
+ </tr></thead><tbody>
 __WORLDS__
 </tbody></table></div>
 <p class="muted">No events means the log hook is not reaching Skald: check the game server's
  hook and that both containers share the events volume. No save means the world's directory is
  not mounted, which is what the clock, the weather and 30-minute kill windows come from.</p>
+<h2>Keeping up with Valheim</h2>
+<p class="muted">Skald reads files and log lines the game owns, and the game changes. Save
+ formats it knows: <b>__SAVE_VERSIONS__</b>. Game versions its weather tables and log patterns
+ were checked against: <b>__GAME_VERSIONS__</b>. Lines carrying the game's timestamp that
+ matched nothing it knows: <b>__UNKNOWN_LINES__</b> &mdash; a number that climbs after an update
+ means a line has been reworded, and something is quietly missing.</p>
 <h2>Where each setting came from</h2>
 <div class="wrap"><table><thead><tr><th>Setting</th><th>Source</th></tr></thead><tbody>
 __SOURCES__

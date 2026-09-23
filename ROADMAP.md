@@ -23,7 +23,7 @@ hours between counted as play; the forecast's footnote named biomes the world
 had not reached; and a world whose bosses fell before Skald was watching
 showed no badges at all.
 
-## M1 — Make it general
+## M1 — Make it general ✅
 
 The work that turns "runs in my homelab" into "runs in yours".
 
@@ -33,9 +33,9 @@ The work that turns "runs in my homelab" into "runs in yours".
       for `milestones.json`
 - [x] Run as a non-root user
 - [x] A diagnostics page: what Skald can read, what it cannot, and why
-- [ ] Handle Valheim updates gracefully — log lines, save format and weather
-      tables can all change, so version detection and fixtures from several
-      game versions
+- [x] Handle Valheim updates gracefully — the game version each server
+      reports, the save format's version, and a count of log lines that match
+      nothing, all on `/diagnostics`
 
 ## M2 — v0.1, the first release worth sharing
 
