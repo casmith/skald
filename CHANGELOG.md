@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 0.1.1
+
+- **Boss kills are dated to the save interval, and the docs now say so
+  plainly.** Valheim does not log a kill: the game's `Setting global key`
+  message is compiled out of release builds, and the server has no verbosity
+  flag to bring it back. Verified by killing Eikthyr on a test server and
+  finding no such line. Skald still reads it if it ever appears.
+- `/diagnostics` shows **how often each world actually saves**, measured
+  from the last two saves, because that is the precision every boss kill is
+  dated to. Tighten it with `SERVER_ARGS: "-saveinterval 300"`, which is now
+  documented and tested (5-minute saves confirmed on a live server).
+
 ## 0.1.0 — first release worth sharing
 
 The first version documented well enough for someone else to run, and tested
