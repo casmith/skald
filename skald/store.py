@@ -90,6 +90,32 @@ SCHEMA = [
     );
     CREATE INDEX sessions_by_expiry ON sessions (expires);
     """,
+    # v5: which characters a player owns, and which one is them.
+    #
+    # Nothing here is taken on trust. The log pairs a connection's SteamID
+    # with the character that follows it, so Skald already knows who played
+    # what; these rows only record what to *do* with that -- which is why
+    # they fill themselves in and a player who never opens the page still
+    # gets the right name.
+    #
+    # `chosen` is the whole reason a primary is stored rather than computed:
+    # the default is the most-played character and follows the playtime, but
+    # once someone has picked one by hand it must stop moving under them.
+    # `hidden` is the same idea for a character they say is not theirs -- a
+    # tombstone, because the log will keep offering it otherwise.
+    """
+    CREATE TABLE characters (
+        steam_id   TEXT NOT NULL REFERENCES users(steam_id),
+        name       TEXT NOT NULL,
+        first_seen REAL NOT NULL,
+        is_primary INTEGER NOT NULL DEFAULT 0,
+        chosen     INTEGER NOT NULL DEFAULT 0,
+        hidden     INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (steam_id, name)
+    );
+    CREATE UNIQUE INDEX one_primary_per_player
+        ON characters (steam_id) WHERE is_primary = 1;
+    """,
 ]
 
 
@@ -261,10 +287,84 @@ def start_session(conn, token_hash, steam_id, created, expires):
 def session_user(conn, token_hash, when):
     """The signed-in user behind a session token, if it is still good."""
     row = conn.execute(
-        "SELECT u.steam_id, u.display_name, u.avatar FROM sessions s"
-        " JOIN users u ON u.steam_id = s.steam_id"
+        "SELECT u.steam_id, u.display_name, u.avatar,"
+        " (SELECT name FROM characters c WHERE c.steam_id = u.steam_id"
+        "  AND c.is_primary = 1) AS character"
+        " FROM sessions s JOIN users u ON u.steam_id = s.steam_id"
         " WHERE s.token_hash = ? AND s.expires > ?", (token_hash, when)).fetchone()
     return dict(row) if row else None
+
+
+def characters(conn, steam_id):
+    """This player's characters, primary first, then first seen."""
+    return [dict(r) for r in conn.execute(
+        "SELECT name, first_seen, is_primary, chosen, hidden FROM characters"
+        " WHERE steam_id = ? ORDER BY is_primary DESC, first_seen", (steam_id,))]
+
+
+def sync_characters(conn, steam_id, ordered, when):
+    """Take up the characters the log says are this player's, and pick one.
+
+    `ordered` is every character the account has been seen playing, most
+    played first, so the default primary is the one they actually play. It
+    is re-applied on every visit and follows the playtime -- until they
+    choose one by hand, after which it is left alone. A character they have
+    hidden stays hidden however much it is played.
+    """
+    with conn:
+        conn.executemany(
+            "INSERT OR IGNORE INTO characters (steam_id, name, first_seen)"
+            " VALUES (?, ?, ?)", [(steam_id, n, when) for n in ordered])
+        rows = {r["name"]: r for r in conn.execute(
+            "SELECT name, is_primary, chosen, hidden FROM characters"
+            " WHERE steam_id = ?", (steam_id,))}
+        current = next((n for n, r in rows.items() if r["is_primary"]), None)
+        if current and rows[current]["chosen"] and not rows[current]["hidden"]:
+            return current
+        want = next((n for n in ordered if not rows[n]["hidden"]), None)
+        if want is None:  # everything visible is hidden: keep any claim we have
+            want = next((n for n, r in rows.items() if not r["hidden"]), None)
+        if want != current:
+            _set_primary(conn, steam_id, want)
+        return want
+
+
+def set_primary(conn, steam_id, name):
+    """Pick a primary by hand, and stop it moving. Unknown names are ignored."""
+    with conn:
+        row = conn.execute("SELECT hidden FROM characters WHERE steam_id = ? AND name = ?",
+                           (steam_id, name)).fetchone()
+        if row is None or row["hidden"]:
+            return False
+        _set_primary(conn, steam_id, name)
+        conn.execute("UPDATE characters SET chosen = 1 WHERE steam_id = ? AND name = ?",
+                     (steam_id, name))
+        return True
+
+
+def hide_character(conn, steam_id, name, hidden=True):
+    """Say a character is not yours, or take that back.
+
+    Hiding one also drops it as primary and forgets that it was chosen, so
+    the next sync picks a fresh default rather than leaving the player with
+    a primary they have just disowned.
+    """
+    with conn:
+        conn.execute("UPDATE characters SET hidden = ? WHERE steam_id = ? AND name = ?",
+                     (1 if hidden else 0, steam_id, name))
+        if hidden:
+            conn.execute("UPDATE characters SET is_primary = 0, chosen = 0"
+                         " WHERE steam_id = ? AND name = ?", (steam_id, name))
+
+
+def _set_primary(conn, steam_id, name):
+    """Caller holds the transaction: the unique index rejects two primaries,
+    so clearing the old one has to land in the same statement sequence."""
+    conn.execute("UPDATE characters SET is_primary = 0, chosen = 0 WHERE steam_id = ?",
+                 (steam_id,))
+    if name is not None:
+        conn.execute("UPDATE characters SET is_primary = 1"
+                     " WHERE steam_id = ? AND name = ?", (steam_id, name))
 
 
 def end_session(conn, token_hash):

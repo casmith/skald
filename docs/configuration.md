@@ -77,9 +77,28 @@ an API key. Sessions are a random token in a cookie (`HttpOnly`,
 only a hash of it, so a stolen copy of the database cannot be used to sign
 in as anyone.
 
-Signing in currently adds nothing but a greeting — it is the foundation for
-claiming your character and, later, contributing your map. Nothing about the
-dashboard changes for people who do not sign in.
+Nothing about the dashboard changes for people who do not sign in.
+
+### Your characters
+
+A Valheim player can have several characters, and a server log names the
+character, not the account. Skald pairs the two itself: a connection logs a
+SteamID, and the character that follows it on that connection is who that
+account turned out to be. So `/me` lists the characters your Steam account
+has actually been seen playing, and **the one you have played most is your
+primary** — chosen automatically, no ceremony.
+
+Change it on that page and it stays where you put it, however much you play
+the others. You can also mark a character as not yours (a shared account, a
+friend's machine), and take that back later.
+
+There is nothing to type in, which is the point: on a public instance a
+free-form claim would let anyone take any name. Here, taking a character
+means having the Steam account that played it.
+
+What you own is **private**. Characters and Steam IDs never appear on the
+dashboard, in the API, or to anyone else — the only thing sign-in changes on
+the public page is that *you* are greeted by your character's name.
 
 ## Where a setting came from
 
@@ -92,6 +111,7 @@ forgot.
 | Path | What |
 |---|---|
 | `/` | The dashboard. `?world=Utgard` picks a world; tabs are plain links |
+| `/me` | Your characters, and which one is your primary. Signed in only |
 | `/diagnostics` | What Skald can see, and what it cannot |
 | `/api/online` | Who is on each world now |
 | `/api/playtime` | Hours and deaths per player, per window |

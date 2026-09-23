@@ -8,7 +8,7 @@ It reads what the server already writes — its log and its world saves — and
 serves a single page. No mods, no plugins, nothing installed in the game, and
 nothing written back to your world.
 
-> **v0.1** — the first release worth sharing. Running daily on the homelab it
+> **v0.3** — the first release worth sharing, and then some. Running daily on the homelab it
 > grew up in, and installed from scratch on a clean machine to make sure the
 > instructions below are true. See the [roadmap](ROADMAP.md) for what is next
 > and the [limitations](docs/limitations.md) for what it cannot do.
@@ -22,6 +22,20 @@ badges](docs/screenshots/dashboard.png)
 ![The forecast: 20 weather turns as an icon grid](docs/screenshots/forecast.png)
 
 ![The dashboard on a phone](docs/screenshots/phone.png)
+
+</details>
+
+<details>
+<summary><b>Your characters</b>, once you sign in</summary>
+
+![Your characters: the ones this Steam account has played, with the
+most-played one marked primary](docs/screenshots/characters.png)
+
+A Valheim log names characters, not accounts — but a connection logs a
+SteamID and the character that follows it is whoever that connection turned
+out to be. So there is nothing to claim and nothing to type in: Skald lists
+the characters your account has played and calls you by the one you play
+most, unless you say otherwise.
 
 </details>
 
@@ -47,8 +61,9 @@ server](#trying-it-without-a-server).)*
 - **In-game weather** for each biome you have reached, the day/night phase,
   and a 7-day forecast.
 - **Charts** of player-hours, deaths and exploration per day.
-- **Optional sign-in through Steam**, which adds personal features without
-  changing anything for people who do not.
+- **Optional sign-in through Steam**, which works out which characters are
+  yours and greets you by the one you play most. Nothing changes for people
+  who do not sign in.
 - JSON for all of it, if you would rather build your own view.
 
 ## How it knows
