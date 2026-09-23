@@ -28,6 +28,12 @@ DEFAULTS = {
     "save_scan_seconds": 60,
     "chart_days": 30,
     "merge_gap_seconds": 120,
+    # Sign in through Steam is off until base_url is set: OpenID has to know
+    # the public address to come back to, and guessing it would be a way to
+    # send people somewhere they did not come from.
+    "base_url": "",
+    "steam_api_key": "",
+    "session_days": 30,
 }
 
 # setting -> (canonical variable, older aliases that still work)
@@ -43,12 +49,16 @@ ENV = {
     "save_scan_seconds": ("SKALD_SAVE_SCAN_SECONDS",),
     "chart_days": ("SKALD_CHART_DAYS",),
     "merge_gap_seconds": ("SKALD_MERGE_GAP_SECONDS", "MERGE_GAP_SECONDS"),
+    "base_url": ("SKALD_BASE_URL",),
+    "steam_api_key": ("SKALD_STEAM_API_KEY",),
+    "session_days": ("SKALD_SESSION_DAYS",),
 }
 WORLDS_ENV = ("SKALD_WORLDS", "TRACKER_SERVERS")
 # "World=/path/to/log,Other=/path" for people who would rather not write the
 # file. Names must match the worlds above.
 LOGS_ENV = ("SKALD_LOG_FILES",)
-INTS = {"port", "poll_seconds", "save_scan_seconds", "chart_days", "merge_gap_seconds"}
+INTS = {"port", "poll_seconds", "save_scan_seconds", "chart_days",
+        "merge_gap_seconds", "session_days"}
 
 
 @dataclass(frozen=True)
@@ -69,6 +79,9 @@ class World:
 @dataclass(frozen=True)
 class Config:
     port: int = DEFAULTS["port"]
+    base_url: str = DEFAULTS["base_url"]
+    steam_api_key: str = DEFAULTS["steam_api_key"]
+    session_days: int = DEFAULTS["session_days"]
     timezone: str = DEFAULTS["timezone"]
     default_world: str = DEFAULTS["default_world"]
     events_dir: str = DEFAULTS["events_dir"]
@@ -83,6 +96,15 @@ class Config:
     # Where the settings came from, for the diagnostics page to show.
     path: str = ""
     sources: dict[str, str] = field(default_factory=dict)
+
+    @property
+    def steam_login(self):
+        """Sign-in is offered only when there is a public address to return to."""
+        return bool(self.base_url)
+
+    @property
+    def secure_cookies(self):
+        return self.base_url.startswith("https://")
 
     def log_files(self):
         """world -> server log path, for the worlds configured that way."""
