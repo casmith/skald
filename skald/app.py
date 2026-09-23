@@ -248,16 +248,49 @@ def looks_like_log(line):
     return TS_RE.search(line) is not None
 
 
-def ingest_events():
-    """Take in whatever the hook has written since last time.
+def unwrap(line):
+    """A log line, however it is wrapped.
 
-    Returns how many lines were new, so the caller knows whether anything
-    downstream needs rebuilding.
+    A server's own log gives the line as written. A container's json log
+    file wraps each one in an object with the text under "log" -- which is
+    how Skald can read container logs without being handed the Docker
+    socket.
+    """
+    if line.startswith("{") and '"log"' in line:
+        try:
+            return json.loads(line).get("log", line).rstrip("\n")
+        except ValueError:
+            return line
+    return line
+
+
+def parse_any(line):
+    return parse_line(unwrap(line))
+
+
+def ingest_events():
+    """Take in whatever has been written since last time.
+
+    Two kinds of source, read the same way: the files the log hook writes,
+    one per world, and a server's own log file for worlds configured that
+    way. Returns how many lines were new.
     """
     added = 0
     for path in event_paths():
         world = os.path.basename(path).split(".", 1)[0]
-        added += store.ingest(db(), path, world, parse_line, looks_like_log)
+        # A hook file holds only the lines Skald asked for, so anything in
+        # it that matches no pattern is worth counting: that is what a
+        # Valheim update rewording a line looks like from here.
+        added += store.ingest(db(), path, world, parse_any, looks_like_log)
+    for world, path in CONFIG.log_files().items():
+        # A server's whole log is mostly lines Skald does not care about,
+        # so counting the misses there would say nothing.
+        added += store.ingest(db(), path, world, parse_any)
+    if added:
+        # Whoever ingested, the replay is now out of date. Invalidating here
+        # rather than in history() means it cannot matter who called first.
+        with _CACHE_LOCK:
+            _CACHE["history"] = None
     return added
 
 
@@ -378,8 +411,8 @@ def history():
     mutate the result; it is shared between requests.
     """
     with _CACHE_LOCK:
-        added = ingest_events()
-        if added or _CACHE["history"] is None:
+        ingest_events()
+        if _CACHE["history"] is None:
             _CACHE["history"] = build_history()
         return _CACHE["history"]
 
@@ -1455,7 +1488,8 @@ def diagnostics(h, now):
     state = load_milestones()
     worlds = []
     for name in worlds_of(h):
-        events = os.path.join(EVENTS_DIR, f"{name}.log")
+        log_file = CONFIG.world(name).log_file
+        events = log_file or os.path.join(EVENTS_DIR, f"{name}.log")
         evs = [e for e in h["sessions"] if e["world"] == name]
         st = status.get(name, {})
         save = state.get(name, {}).get("save") or {}
@@ -1467,7 +1501,11 @@ def diagnostics(h, now):
             "status_url": CONFIG.world(name).status_url,
             "status": ("up" if st.get("up") else "down" if st else "not polled yet"),
             "status_error": st.get("error"),
-            "events_file": {"path": events, "exists": os.path.exists(events),
+            # isfile, not exists: a bind mount whose source has gone (a
+            # container log path changes when the container is recreated)
+            # leaves an empty *directory* behind, which is not a log.
+            "events_file": {"path": events, "exists": os.path.isfile(events),
+                            "source": "server log" if log_file else "log hook",
                             "sessions_seen": len(evs)},
             "game_version": game_version,
             "game_version_verified": (game_version or "").startswith(VERIFIED_GAME_VERSIONS),
@@ -1539,8 +1577,9 @@ def render_diagnostics(d):
         worlds.append(
             f'<tr><td>{html.escape(w["world"])}</td>'
             f'<td>{yes_no(w["status"] == "up", w["status"], w["status"])}</td>'
-            f'<td>{yes_no(ev["exists"])} <span class="muted">{ev["sessions_seen"]} '
-            f'session{"" if ev["sessions_seen"] == 1 else "s"}</span></td>'
+            f'<td>{yes_no(ev["exists"])} <span class="muted">{ev["source"]}, '
+            f'{ev["sessions_seen"]} session{"" if ev["sessions_seen"] == 1 else "s"}'
+            f'</span></td>'
             f'<td>{yes_no(bool(sv["latest"]), sv["latest"] or "none", "none")}</td>'
             f'<td>{yes_no(bk["count"] > 0, str(bk["count"]), "0")}</td>'
             f'<td>{w["milestones"]}</td><td>{w["biomes_unlocked"]}</td>'

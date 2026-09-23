@@ -66,10 +66,9 @@ adds personal features. Nothing changes for people who do not.
 
 ## M5 — Later
 
-- [ ] Read a plain log file, for vanilla and systemd servers — the biggest
-      gap in reach, and likely to jump the queue
-- [ ] Read container logs through the Docker socket (off by default; it is a
-      powerful socket to hand to a web app)
+- [x] Read a plain log file, for vanilla and systemd servers (0.2.0) — and
+      a container's json log, unwrapped, though its path moves whenever the
+      container is recreated
 - [ ] Prometheus metrics
 - [ ] Discord or webhook alerts when a boss falls
 - [ ] Translations
