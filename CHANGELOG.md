@@ -13,6 +13,14 @@
   file, and says so on `/diagnostics`.
 - Ingesting outside the page's own path left the replay cache stale.
   Ingestion invalidates it itself, so call order cannot matter.
+- **Optional sign in through Steam**, off until `base_url` is set. It is
+  OpenID 2.0 — Steam offers no OAuth2 to third-party sites — so there is
+  nothing to register and no client secret, and what comes back is a
+  SteamID64 and nothing else. A display name and avatar need a free Steam
+  Web API key, which is optional. Sessions are a random token in an
+  HttpOnly, SameSite=Lax cookie (Secure over https); the database keeps only
+  its hash. It gates nothing yet: the dashboard stays exactly as public as
+  wherever you host it.
 
 ## 0.1.1
 
