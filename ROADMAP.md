@@ -40,7 +40,8 @@ The work that turns "runs in my homelab" into "runs in yours".
 ## M2 — v0.1, the first release worth sharing
 
 - [ ] Multi-arch image (amd64, arm64) published to GHCR
-- [ ] Quick start that works from a clean machine
+- [x] Quick start that works from a clean machine (verified on a fresh
+      Ubuntu VM, which found three bugs that made it fail outright)
 - [ ] Docs: install, configuration reference, how it works, and an honest
       limitations page
 - [ ] Versioned releases and a changelog

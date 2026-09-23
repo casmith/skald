@@ -47,6 +47,7 @@ import json
 import os
 import re
 import struct
+import sys
 import threading
 import time
 import urllib.parse
@@ -1632,6 +1633,12 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         path, _, query = self.path.partition("?")
         if path == "/healthz":
+            # Reaching the database is the point: a Skald that cannot is a
+            # Skald whose every page fails, and "healthy" would be a lie.
+            try:
+                db().execute("SELECT 1")
+            except Exception as e:
+                return self._send(503, f"database unavailable: {e}", "text/plain")
             return self._send(200, "ok", "text/plain")
 
         params = urllib.parse.parse_qs(query)
@@ -1700,6 +1707,17 @@ def main():
             print(f"note: {EVENTS_DIR} is not writable by this user and could not be "
                   "opened up; the game's log hook may not be able to write events "
                   "there. See /diagnostics.", flush=True)
+    try:
+        db()
+    except Exception as e:
+        sys.exit(
+            f"skald cannot open its database at {os.path.join(DATA_DIR, 'skald.db')}: {e}\n"
+            f"\n{DATA_DIR} must be writable by the user skald runs as "
+            f"(uid {os.getuid()}). A fresh Docker named volume inherits the "
+            "image's ownership and needs nothing; a bind mount or a volume "
+            "from an older version may need:\n"
+            f"  chown -R {os.getuid()}:{os.getgid()} <the directory or volume>\n"
+            "See the README's Permissions section.")
     threading.Thread(target=poller, daemon=True).start()
     threading.Thread(target=milestone_poller, daemon=True).start()
     print(f"skald {__version__} listening on :{PORT}, worlds={sorted(SERVERS)}"
