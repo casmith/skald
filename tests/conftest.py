@@ -10,7 +10,7 @@ from datetime import datetime, UTC
 
 import pytest
 
-from skald import app
+from skald import app, config
 
 # Invented players and worlds, used everywhere in the tests.
 ALFR, BERA, CNUT = "Alfr", "Bera", "Cnut"
@@ -57,20 +57,19 @@ def world_save(keys, world_time=12345.6):
 
 
 @pytest.fixture
-def tracker(tmp_path, monkeypatch):
+def tracker(tmp_path, request):
     """app, pointed at empty scratch directories and one invented world."""
     events, data, saves, nas = (tmp_path / n for n in
                                 ("events", "data", "saves", "nas"))
     for d in (events, data, saves, nas):
         d.mkdir()
-    monkeypatch.setattr(app, "EVENTS_DIR", str(events))
-    monkeypatch.setattr(app, "DATA_DIR", str(data))
-    monkeypatch.setattr(app, "SAVES_ROOT", str(saves))
-    monkeypatch.setattr(app, "BACKUPS_ROOT", str(nas))
-    monkeypatch.setattr(app, "MILESTONE_FILE", str(data / "milestones.json"))
-    monkeypatch.setattr(app, "SERVERS", {WORLD: "http://127.0.0.1:1/status.json"})
-    monkeypatch.setattr(app, "DEFAULT_WORLD", WORLD)
-    app._CACHE.update(sig=None, history=None)
+    cfg = config.Config(
+        events_dir=str(events), data_dir=str(data), saves_root=str(saves),
+        backups_root=str(nas), default_world=WORLD, timezone="UTC",
+        worlds=(config.World(name=WORLD, status_url="http://127.0.0.1:1/status.json"),))
+    before = app.CONFIG
+    app.apply_config(cfg)
+    request.addfinalizer(lambda: app.apply_config(before))
     app.STATUS.clear()
     app.LAST_NONZERO.clear()
 
