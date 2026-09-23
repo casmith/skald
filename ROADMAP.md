@@ -37,14 +37,14 @@ The work that turns "runs in my homelab" into "runs in yours".
       reports, the save format's version, and a count of log lines that match
       nothing, all on `/diagnostics`
 
-## M2 — v0.1, the first release worth sharing
+## M2 — v0.1, the first release worth sharing ✅
 
-- [ ] Multi-arch image (amd64, arm64) published to GHCR
+- [x] Multi-arch image (amd64, arm64) published to GHCR
 - [x] Quick start that works from a clean machine (verified on a fresh
       Ubuntu VM, which found three bugs that made it fail outright)
-- [ ] Docs: install, configuration reference, how it works, and an honest
+- [x] Docs: install, configuration reference, how it works, and an honest
       limitations page
-- [ ] Versioned releases and a changelog
+- [x] Versioned releases and a changelog
 
 ## M3 — Sign in through Steam (optional)
 
