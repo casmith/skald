@@ -65,6 +65,12 @@ SCHEMA = [
     ALTER TABLE saves ADD COLUMN save_version INTEGER;
     ALTER TABLE files ADD COLUMN skipped INTEGER NOT NULL DEFAULT 0;
     """,
+    # v3: when the save before the current one landed. The gap between them
+    # is how often the world is saved, which is the precision every boss
+    # kill is dated to, so it is worth showing.
+    """
+    ALTER TABLE saves ADD COLUMN prev_ts REAL;
+    """,
 ]
 
 
@@ -172,6 +178,7 @@ def state(conn):
             "save": {"last": row["name"], "last_ts": row["ts"],
                      "world_time": row["world_time"],
                      "version": row["save_version"],
+                     "prev_ts": row["prev_ts"],
                      "keys": json.loads(row["keys"]) if row["keys"] else None},
             "last": row["backup"] or "", "last_ts": row["backup_ts"],
             "live": {}, "milestones": {},
@@ -192,15 +199,15 @@ def put_milestone(conn, world, key, after, by, source):
             " VALUES (?, ?, ?, ?, ?)", (world, key, after, by, source))
 
 
-def put_save(conn, world, name, ts, world_time, keys, save_version=None):
+def put_save(conn, world, name, ts, world_time, keys, save_version=None, prev_ts=None):
     with conn:
         conn.execute(
-            "INSERT INTO saves (world, name, ts, world_time, keys, save_version)"
-            " VALUES (?, ?, ?, ?, ?, ?)"
+            "INSERT INTO saves (world, name, ts, world_time, keys, save_version, prev_ts)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?)"
             " ON CONFLICT(world) DO UPDATE SET name = ?, ts = ?, world_time = ?,"
-            " keys = ?, save_version = ?",
-            (world, name, ts, world_time, json.dumps(keys), save_version,
-             name, ts, world_time, json.dumps(keys), save_version))
+            " keys = ?, save_version = ?, prev_ts = ?",
+            (world, name, ts, world_time, json.dumps(keys), save_version, prev_ts,
+             name, ts, world_time, json.dumps(keys), save_version, prev_ts))
 
 
 def put_backup(conn, world, name, ts):

@@ -21,16 +21,31 @@ Boss kills are luckier: they are stored in the world, so Skald finds ones
 that happened years ago. It just cannot say *when* — they show as "before"
 the first save it saw, unless your backups reach back far enough to pin them.
 
-## Timing is as precise as the evidence allows
+## Boss kills are dated to the save interval
 
 | Source | Window |
 |---|---|
-| The server logged the key being set | exact, to the second |
-| A key new in an autosave | 30 minutes |
+| A key new in an autosave | the save interval — 30 minutes by default |
 | A key new in an hourly backup | about 90 minutes |
+| The server logged the key being set | exact, but see below |
 
-Whether the server logs global keys at all depends on the game version, so
-the exact case is a bonus, not a promise.
+**Valheim does not log boss kills.** The game's code contains a
+`Setting global key` message, and Skald reads it if it appears, but 1.0.x
+does not print it: verified by killing Eikthyr on a test server and finding
+no such line. There is no log level to turn it on either — the server has no
+verbosity flag, and the message is compiled out of release builds.
+
+So in practice a kill is dated to a window as wide as your save interval.
+You can narrow it by saving more often:
+
+```yaml
+    environment:
+      SERVER_ARGS: "-saveinterval 300"   # 5 minutes instead of 30
+```
+
+That is a real trade: every save writes the world out and players feel a
+brief hitch, so it costs more on a large, busy world. `/diagnostics` shows
+how often each world actually saves, which is the precision you are getting.
 
 ## Playtime is per character, not per account
 
