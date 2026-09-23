@@ -55,6 +55,7 @@ import zipfile
 
 from skald import __version__
 from skald import config as configuration
+from skald import store
 from skald import weather
 from datetime import datetime, timedelta, UTC
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -97,11 +98,10 @@ WINDOWS = [("24h", 86400), ("7d", 7 * 86400), ("30d", 30 * 86400)]
 #   3. the hourly backups on the NAS, <BACKUPS_ROOT>/<world, lowercased>/
 #      backups/worlds-YYYYMMDD-HHMMSS.zip -- ~90 minutes, but they reach back
 #      14 days, so they date what happened before 1 and 2 were watching.
-# What 2 and 3 find is kept in MILESTONE_FILE: saves roll over and backups
-# are pruned, and a milestone must outlive the files that dated it.
+# What 2 and 3 find is kept in the database: saves roll over and backups are
+# pruned, and a milestone must outlive the files that dated it.
 BACKUPS_ROOT = CONFIG.backups_root
 SAVES_ROOT = CONFIG.saves_root
-MILESTONE_FILE = os.path.join(DATA_DIR, "milestones.json")
 SAVE_SCAN_SECONDS = CONFIG.save_scan_seconds
 BACKUP_SCAN_EVERY = 10  # save scans, i.e. every 10 minutes
 # A boss summoned this long before its kill counts as that fight's start.
@@ -193,7 +193,7 @@ def apply_config(cfg):
     """Point the module at a different config: used by main() and by tests."""
     global CONFIG, LOCAL_TZ, PORT, EVENTS_DIR, DATA_DIR, POLL_SECONDS, MERGE_GAP
     global CHART_DAYS, SERVERS, DEFAULT_WORLD, BACKUPS_ROOT, SAVES_ROOT
-    global MILESTONE_FILE, SAVE_SCAN_SECONDS
+    global SAVE_SCAN_SECONDS
     CONFIG = cfg
     try:
         from zoneinfo import ZoneInfo
@@ -206,40 +206,49 @@ def apply_config(cfg):
     BACKUPS_ROOT, SAVES_ROOT = cfg.backups_root, cfg.saves_root
     SERVERS = {w.name: w.status_url for w in cfg.worlds}
     DEFAULT_WORLD = cfg.default_world
-    MILESTONE_FILE = os.path.join(cfg.data_dir, "milestones.json")
+    # A new config means a new data directory, so the old database is not
+    # ours any more.
+    global _DB
+    with _DB_LOCK:
+        if _DB is not None:
+            _DB.close()
+        _DB = None
     _CACHE.update(sig=None, history=None)
     return cfg
 
 
 def event_paths():
-    return sorted(glob.glob(os.path.join(EVENTS_DIR, "*.log"))
-                  + glob.glob(os.path.join(DATA_DIR, "*.log")))
+    return sorted(glob.glob(os.path.join(EVENTS_DIR, "*.log")))
+
+
+def db():
+    """The database, opened once and shared."""
+    global _DB
+    with _DB_LOCK:
+        if _DB is None:
+            _DB = store.connect(DATA_DIR)
+            imported = store.import_legacy(_DB, DATA_DIR)
+            if imported:
+                print(f"imported {imported} milestones from milestones.json", flush=True)
+        return _DB
+
+
+def ingest_events():
+    """Take in whatever the hook has written since last time.
+
+    Returns how many lines were new, so the caller knows whether anything
+    downstream needs rebuilding.
+    """
+    added = 0
+    for path in event_paths():
+        world = os.path.basename(path).split(".", 1)[0]
+        added += store.ingest(db(), path, world, parse_line)
+    return added
 
 
 def load_events():
-    """World -> sorted events, from both the hook files and our own markers.
-
-    Deduplicated on the line itself (from its timestamp on), so a backfill
-    from `docker logs` can overlap the live file without double counting.
-    """
-    paths = event_paths()
-    seen, events = set(), {}
-    for path in paths:
-        world = os.path.basename(path).split(".", 1)[0]
-        try:
-            with open(path, errors="replace") as f:
-                lines = f.read().splitlines()
-        except OSError:
-            continue
-        for line in lines:
-            ev = parse_line(line)
-            if not ev or (world, ev[4]) in seen:
-                continue
-            seen.add((world, ev[4]))
-            events.setdefault(world, []).append(ev[:4])
-    for evs in events.values():
-        evs.sort(key=lambda e: (e[0], e[1]))
-    return events
+    """World -> its events, in the order the replay wants them."""
+    return store.events(db())
 
 
 def replay_world(world, evs, out):
@@ -342,27 +351,21 @@ def build_history():
 
 
 _CACHE = {"sig": None, "history": None}
-_CACHE_LOCK = threading.Lock()
+_CACHE_LOCK = threading.RLock()
+_DB, _DB_LOCK = None, threading.RLock()
 
 
 def history():
-    """build_history(), redone only when an event file has changed.
+    """The replay, redone only when new events have arrived.
 
-    The page is public (valheim.kalde.in), and a full replay grows with the
-    logs -- this keeps a request's cost flat however often it is made.
-    Callers must not mutate the result; it is shared between requests.
+    The page can be public, and a full replay grows with the history -- this
+    keeps a request's cost flat however often it is made. Callers must not
+    mutate the result; it is shared between requests.
     """
-    sig = []
-    for p in event_paths():
-        try:
-            st = os.stat(p)
-            sig.append((p, st.st_size, st.st_mtime_ns))
-        except OSError:
-            pass
-    sig = tuple(sig)
     with _CACHE_LOCK:
-        if _CACHE["sig"] != sig:
-            _CACHE["history"], _CACHE["sig"] = build_history(), sig
+        added = ingest_events()
+        if added or _CACHE["history"] is None:
+            _CACHE["history"] = build_history()
         return _CACHE["history"]
 
 
@@ -406,8 +409,10 @@ def poll_once():
         at = max(LAST_NONZERO.get(world, st["status_ts"]),
                  max(s["start"] for s in opened))
         stamp = datetime.fromtimestamp(at, UTC).strftime("%m/%d/%Y %H:%M:%S")
-        with open(os.path.join(DATA_DIR, f"{world}.reconcile.log"), "a") as f:
-            f.write(f"{stamp}: [tracker] no players online\n")
+        store.add_event(db(), world, f"{stamp}: [skald] no players online",
+                        at, 3, "gone", ())
+        with _CACHE_LOCK:
+            _CACHE["history"] = None
 
 
 def poller():
@@ -442,19 +447,9 @@ def backup_global_keys(path, world):
         return db2_world(z.read(dbs[0]))[0]
 
 
-def save_milestones(state):
-    tmp = MILESTONE_FILE + ".tmp"
-    with open(tmp, "w") as f:
-        json.dump(state, f, indent=2)
-    os.replace(tmp, MILESTONE_FILE)
-
-
 def load_milestones():
-    try:
-        with open(MILESTONE_FILE) as f:
-            return json.load(f)
-    except (OSError, ValueError):
-        return {}
+    """Milestone and save state, in the shape the rest of the code expects."""
+    return store.state(db())
 
 
 def scan_backups():
@@ -465,12 +460,13 @@ def scan_backups():
     """
     state = load_milestones()
     for world in SERVERS:
-        st = state.setdefault(world, {"last": "", "last_ts": None, "milestones": {}})
+        st = state.get(world) or {"last": "", "last_ts": None, "milestones": {}}
+        known = set(st["milestones"])
         pattern = os.path.join(CONFIG.backups_dir(world), "worlds-*.zip")
         for path in sorted(glob.glob(pattern)):
             name = os.path.basename(path)
             m = BACKUP_NAME_RE.search(name)
-            if not m or name <= st["last"]:
+            if not m or name <= (st["last"] or ""):
                 continue
             try:
                 keys = backup_global_keys(path, world)
@@ -481,10 +477,11 @@ def scan_backups():
                 break
             ts = datetime.strptime("".join(m.groups()), "%Y%m%d%H%M%S").replace(
                 tzinfo=UTC).timestamp()
-            for k in keys - set(st["milestones"]):
-                st["milestones"][k] = {"after": st["last_ts"], "by": ts}
+            for k in keys - known:
+                store.put_milestone(db(), world, k, st["last_ts"], ts, "backup")
+                known.add(k)
+            store.put_backup(db(), world, name, ts)
             st["last"], st["last_ts"] = name, ts
-    save_milestones(state)
 
 
 def latest_save(world):
@@ -513,38 +510,35 @@ def scan_saves():
     first save ever seen only sets the baseline.
     """
     state = load_milestones()
-    changed = False
     for world in SERVERS:
         try:
             found = latest_save(world)
             if not found:
                 continue
-            name, done, db2 = found
-            sv = state.setdefault(world, {"last": "", "last_ts": None, "milestones": {}}) \
-                .setdefault("save", {"last": "", "last_ts": None, "keys": None})
+            name, done, db2_path = found
+            sv = (state.get(world) or {}).get("save") or {
+                "last": "", "last_ts": None, "keys": None}
             if name == sv["last"] and done == sv["last_ts"]:
                 continue
-            with open(db2, "rb") as f:
+            with open(db2_path, "rb") as f:
                 keys, world_time = db2_world(f.read())
         except Exception as e:
             # Mid-save or rolled over under us: try again next minute.
             print(f"milestones: {world} save unreadable, retrying: {e}", flush=True)
             continue
-        live = state[world].setdefault("live", {})
+        live = (state.get(world) or {}).get("live") or {}
+        known = set((state.get(world) or {}).get("milestones") or {})
         if sv["keys"] is None:
             # First save seen: whatever it already holds happened before
             # skald was watching. Record it as "by then" with no lower
             # bound, so a world with history still shows its milestones --
             # the backups, if there are any, can date them properly later.
-            for k in keys - set(live) - set(state[world].get("milestones", {})):
-                live[k] = {"after": None, "by": done}
+            for k in keys - set(live) - known:
+                store.put_milestone(db(), world, k, None, done, "save")
         else:
             for k in keys - set(sv["keys"]) - set(live):
-                live[k] = {"after": sv["last_ts"], "by": done}
-        sv.update(last=name, last_ts=done, keys=sorted(keys), world_time=world_time)
-        changed = True
-    if changed:
-        save_milestones(state)
+                store.put_milestone(db(), world, k, sv["last_ts"], done, "save")
+        store.put_save(db(), world, name, done, world_time, sorted(keys))
 
 
 def milestone_poller():
@@ -1457,8 +1451,14 @@ def diagnostics(h, now):
             "milestones": len([m for m in milestones(h) if m["world"] == name]),
             "biomes_unlocked": len(unlocked_biomes(h, name)),
         })
+    counts = db().execute("SELECT count(*) AS events,"
+                          " count(DISTINCT world) AS worlds FROM events").fetchone()
+    db_path = os.path.join(DATA_DIR, "skald.db")
     return {
         "version": __version__,
+        "database": {"path": db_path,
+                     "size_bytes": os.path.getsize(db_path) if os.path.exists(db_path) else 0,
+                     "events": counts["events"], "worlds": counts["worlds"]},
         "config": {"path": CONFIG.path or "none (environment and defaults only)",
                    "timezone": CONFIG.timezone, "sources": CONFIG.sources},
         "paths": {"events": path_info(EVENTS_DIR, want_write=True),
@@ -1497,6 +1497,9 @@ def render_diagnostics(d):
     return (DIAG_PAGE
             .replace("__VERSION__", html.escape(d["version"]))
             .replace("__CONFIG_PATH__", html.escape(d["config"]["path"]))
+            .replace("__DB_PATH__", html.escape(d["database"]["path"]))
+            .replace("__DB_EVENTS__", f'{d["database"]["events"]:,}')
+            .replace("__DB_SIZE__", f'{d["database"]["size_bytes"] / 1024:,.0f}')
             .replace("__PATHS__", "\n".join(rows))
             .replace("__WORLDS__", "\n".join(worlds) or
                      '<tr><td colspan="7" class="muted">no worlds configured</td></tr>')
@@ -1528,6 +1531,8 @@ DIAG_PAGE = """<!doctype html>
 <h1>Diagnostics</h1>
 <p class="muted">Skald __VERSION__ &middot; config: <span class="mono">__CONFIG_PATH__</span>
  &middot; <a href="/">back to the dashboard</a> &middot; <a href="/api/diagnostics">json</a></p>
+<p class="muted">Database: <span class="mono">__DB_PATH__</span> &middot;
+ __DB_EVENTS__ events &middot; __DB_SIZE__ KB</p>
 <h2>Paths</h2>
 <div class="wrap"><table><thead><tr><th>What</th><th>Path</th><th>Exists</th><th>Readable</th>
  <th>Writable</th></tr></thead><tbody>

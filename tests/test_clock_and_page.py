@@ -4,7 +4,10 @@ Valheim's world clock only advances while someone is online: the server
 stops it when a world empties. Weather and the in-game day both hang off
 that, so it is worth pinning.
 """
-from tests.conftest import ALFR, BERA, WORLD, join, leave, stamp
+import json
+from datetime import UTC, datetime
+
+from tests.conftest import ALFR, BERA, WORLD, join, leave
 
 from skald import app, config
 
@@ -75,15 +78,42 @@ def test_the_api_shapes(tracker):
     assert app.weather_report(h, WORLD, now)["biomes"][0]["biome"] == "Meadows"
 
 
-def test_a_crash_closes_the_session_at_the_last_sighting(tracker):
-    """No Closing socket ever arrives; the poller leaves a marker instead,
-    dated to the last time anyone was seen, and that ends the session."""
+def test_a_crash_closes_the_session_at_the_last_sighting(tracker, monkeypatch):
+    """No Closing socket ever arrives. The world's own query says nobody is
+    there, so the poller records that, and the session ends at the last time
+    anyone was seen."""
     h = tracker.write_events(join(T, ALFR))
     assert h["sessions"][0]["end"] is None
-    marker = tracker.dirs["data"] / f"{WORLD}.reconcile.log"
-    marker.write_text(stamp(T + 1800) + ": [tracker] no players online\n")
-    app._CACHE.update(sig=None, history=None)
-    assert app.history()["sessions"][0]["end"] == T + 1800
+
+    # The status endpoint, as the game serves it: nobody online, and recent
+    # enough to be believed.
+    seen_at = T + 1800
+
+    class Response:
+        status = 200
+
+        def read(self):
+            return json.dumps({
+                "last_status_update": datetime.fromtimestamp(seen_at + 60, UTC).isoformat(),
+                "error": None, "player_count": 0}).encode()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    monkeypatch.setattr(app.urllib.request, "urlopen", lambda *a, **k: Response())
+    # These tests live at a fixed point in time; the poller compares the
+    # status against the clock, so the clock has to agree.
+    monkeypatch.setattr(app.time, "time", lambda: seen_at + 120)
+    app.LAST_NONZERO[WORLD] = seen_at
+    app.poll_once()
+    assert app.history()["sessions"][0]["end"] == seen_at
+
+    # Polling again must not pile up markers or move the end time.
+    app.poll_once()
+    assert app.history()["sessions"][0]["end"] == seen_at
 
 
 def test_diagnostics_reports_what_it_can_see(tracker):
@@ -99,6 +129,7 @@ def test_diagnostics_reports_what_it_can_see(tracker):
     assert w["saves"]["world_clock"] == 50_060  # the save, plus a minute played
     assert w["backups"]["count"] == 0
     assert w["status"] == "not polled yet"
+    assert d["database"]["events"] == 3 and d["database"]["worlds"] == 1
     assert "Diagnostics" in app.render_diagnostics(d)
 
 

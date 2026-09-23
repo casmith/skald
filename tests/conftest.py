@@ -68,7 +68,7 @@ def tracker(tmp_path, request):
         backups_root=str(nas), default_world=WORLD, timezone="UTC",
         worlds=(config.World(name=WORLD, status_url="http://127.0.0.1:1/status.json"),))
     before = app.CONFIG
-    app.apply_config(cfg)
+    app.apply_config(cfg)  # closes and forgets any database from a past test
     request.addfinalizer(lambda: app.apply_config(before))
     app.STATUS.clear()
     app.LAST_NONZERO.clear()

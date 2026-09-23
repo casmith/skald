@@ -97,6 +97,21 @@ Mount it at `/config/skald.toml`, or point `SKALD_CONFIG` elsewhere.
 A world can override `saves_dir` or `backups_dir` if its files sit somewhere
 unusual. The older `TRACKER_*` variable names still work.
 
+## Where the data lives
+
+`data_dir` holds one SQLite file, `skald.db`. The hook's event files are
+where *new* lines arrive, but they are not a good long-term home — they can
+be rotated, trimmed or lost — so every line is taken in once, keyed by its
+own text, and everything is read from the database after that. Ingestion is
+incremental: a file that has only grown is read from where it left off, and
+one that shrank is read again, where the key makes the repeats free.
+
+That also means history outlives the files. Back up `skald.db` and you have
+every session, death and milestone; the event files can go.
+
+Upgrading from a version that kept `milestones.json`? It is imported on
+first run, once. Nothing is deleted.
+
 ## When something is missing
 
 **`/diagnostics`** answers "why is X not showing?" — every path with whether

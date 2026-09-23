@@ -27,13 +27,12 @@ showed no badges at all.
 
 The work that turns "runs in my homelab" into "runs in yours".
 
-- [ ] Config file instead of environment variables, with worlds, paths and
+- [x] Config file instead of environment variables, with worlds, paths and
       timezone in one place
-- [ ] SQLite with migrations, replacing the JSON state files, and an importer
-      for existing event logs
-- [ ] Run as a non-root user (today it is root, only to fix volume
-      permissions)
-- [ ] A diagnostics page: what Skald can read, what it cannot, and why
+- [x] SQLite with migrations, replacing the JSON state files, and an importer
+      for `milestones.json`
+- [x] Run as a non-root user
+- [x] A diagnostics page: what Skald can read, what it cannot, and why
 - [ ] Handle Valheim updates gracefully — log lines, save format and weather
       tables can all change, so version detection and fixtures from several
       game versions
