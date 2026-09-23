@@ -53,7 +53,10 @@ adds personal features. Nothing changes for people who do not.
 
 - [x] OpenID 2.0 — Steam does not offer OAuth2 for third-party sites; sign-in
       returns a SteamID64 and nothing else
-- [ ] Claim your character, so a Steam account and a character name are linked
+- [x] Claim your character — and it claims itself: the log already pairs a
+      connection's SteamID with the character on it, so `/me` offers only
+      the characters that account has played, and the most-played one is the
+      primary unless you choose otherwise (0.3.0)
 - [ ] A personal view: your playtime, your deaths, your sessions
 - [ ] Steam Web API key (optional) for display name and avatar
 

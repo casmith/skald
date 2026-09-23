@@ -903,6 +903,56 @@ def recent(h, now, limit):
     return out
 
 
+def my_characters(h, steam_id, now):
+    """The characters a Steam account has actually played, most played first.
+
+    This is what makes claiming safe on a public instance. A claim is not a
+    free-form assertion -- "I am Isein" -- because the log already answers
+    it: `Got connection SteamID <id>` is followed by the `Got character
+    ZDOID from <name>` of whoever that connection turned out to be, and the
+    session replay carries the pairing. So the only characters offered are
+    the ones that account has been seen playing, and taking someone else's
+    would mean having their Steam account.
+
+    Sessions from before the hook existed can lack a SteamID (a backfilled
+    log may start mid-connection), so a character is offered if *any* of its
+    sessions carry the account. Their playtime still counts: the totals here
+    are the character's, not only the identified part.
+    """
+    mine, stats = set(), {}
+    for s in h["sessions"]:
+        if s.get("steamid") == steam_id:
+            mine.add(s["player"])
+    for s in h["sessions"]:
+        if s["player"] not in mine:
+            continue
+        c = stats.setdefault(s["player"], {
+            "name": s["player"], "seconds": 0.0, "sessions": 0,
+            "last_seen": 0.0, "worlds": set(), "online": False})
+        end = s["end"]
+        c["sessions"] += 1
+        c["seconds"] += (now if end is None else end) - s["start"]
+        c["last_seen"] = max(c["last_seen"], s["start"] if end is None else end)
+        c["worlds"].add(s["world"])
+        c["online"] = c["online"] or end is None
+    for c in stats.values():
+        c["worlds"] = sorted(c["worlds"])
+    return sorted(stats.values(), key=lambda c: -c["seconds"])
+
+
+def sync_user(conn, user, h, now):
+    """Bring a signed-in player's characters up to date. Returns them.
+
+    Called on both pages a signed-in player can land on, because the log is
+    what decides this and it keeps moving: a character played for the first
+    time this evening should not need anyone to press anything.
+    """
+    mine = my_characters(h, user["steam_id"], now)
+    user["character"] = store.sync_characters(
+        conn, user["steam_id"], [c["name"] for c in mine], now)
+    return mine
+
+
 def daily(h, now, days):
     """Per local calendar day, oldest first: hours played, deaths, areas explored."""
     today = datetime.fromtimestamp(now, LOCAL_TZ).date()
@@ -1299,6 +1349,7 @@ PAGE = """<!doctype html>
   border:1px solid var(--line);border-radius:3px;padding:.15rem .6rem;text-decoration:none}
  .who button:hover,.signin:hover{border-color:var(--bronze);color:var(--gold)}
  a.signin{display:block;width:fit-content;margin:-1rem auto 1.2rem}
+ .who a.signin{display:inline-block;margin:0}
  .panel,.card,table,.chart,.trophy{background:linear-gradient(180deg,#211a12,var(--panel));border:1px solid var(--line);
   border-radius:3px;box-shadow:inset 0 0 0 1px rgba(232,178,90,.05),0 2px 10px rgba(0,0,0,.45)}
  /* World tabs: carved-plank look, gold when selected. */
@@ -1570,6 +1621,111 @@ def yes_no(ok, good="yes", bad="no"):
     return f'<span class="{cls}">{good if ok else bad}</span>'
 
 
+def render_me(user, chars, rows_db):
+    """Your characters: the ones the log says are yours, and which one is you."""
+    state = {r["name"]: r for r in rows_db}
+    primary = next((r["name"] for r in rows_db if r["is_primary"]), None)
+    chosen = bool(primary and state[primary]["chosen"])
+    rows = []
+    for c in chars:
+        st = state.get(c["name"], {})
+        if st.get("hidden"):
+            action = _button("/me/mine", c["name"], "mine after all")
+            note = ' class="off"'
+        elif c["name"] == primary:
+            action = '<span class="badge">primary</span>'
+            note = ""
+        else:
+            action = (_button("/me/primary", c["name"], "make primary")
+                      + _button("/me/hide", c["name"], "not mine"))
+            note = ""
+        seen = ('<span class="on">online now</span>' if c["online"]
+                else t(c["last_seen"]))
+        rows.append(
+            f'<tr{note}><td><b>{html.escape(c["name"])}</b></td>'
+            f'<td class="muted">{html.escape(", ".join(c["worlds"]))}</td>'
+            f'<td>{fmt_dur(c["seconds"])}</td><td>{c["sessions"]}</td>'
+            f'<td>{seen}</td><td class="act">{action}</td></tr>')
+
+    who = html.escape(user["display_name"] or f'Steam {user["steam_id"][-4:]}')
+    avatar = (f'<img class="avatar" src="{html.escape(user["avatar"], quote=True)}" alt="">'
+              if user.get("avatar") else "")
+    if not rows:
+        body = ('<p class="empty">Skald has not seen this Steam account playing yet.'
+                ' Characters appear here by themselves once you have joined a world it'
+                ' is watching &mdash; it learns which are yours from the server&rsquo;s'
+                ' own log, which is why there is nothing here to type in.</p>')
+    else:
+        body = ('<div class="wrap"><table><thead><tr><th>Character</th><th>Worlds</th>'
+                '<th>Played</th><th>Sessions</th><th>Last seen</th><th></th></tr>'
+                f'</thead><tbody>{"".join(rows)}</tbody></table></div>')
+    if not primary:
+        lead = ""
+    elif chosen:
+        lead = (f'You are <b>{html.escape(primary)}</b>, because you said so. '
+                'Skald will not move it now, however much you play the others.')
+    else:
+        lead = (f'You are <b>{html.escape(primary)}</b> &mdash; your most-played '
+                'character, picked automatically. Choose one yourself and it stays put.')
+    return (ME_PAGE.replace("__WHO__", f"{avatar}<span>{who}</span>")
+            .replace("__BODY__", body)
+            .replace("__LEAD__", f'<p class="note">{lead}</p>' if lead else ""))
+
+
+def _button(action, name, label):
+    return (f'<form method="post" action="{action}">'
+            f'<input type="hidden" name="name" value="{html.escape(name, quote=True)}">'
+            f'<button type="submit">{label}</button></form>')
+
+
+ME_PAGE = """<!doctype html>
+<html><head><meta charset="utf-8"><title>Your characters &middot; Skald</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Averia+Serif+Libre:wght@400;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700&display=swap" rel="stylesheet">
+<style>
+ :root{color-scheme:dark;--bg:#0e0b08;--panel:#1c1610;--panel-2:#241c14;--line:#3b2e20;
+  --bronze:#8a6a3f;--gold:#e8b25a;--gold-dim:#cfa266;--fg:#eadcc0;--muted:#a8977a;--on:#8fc46a}
+ body{font:15px/1.5 'Averia Serif Libre',Georgia,serif;margin:0 auto;max-width:50rem;
+  padding:1.75rem 1rem 3rem;color:var(--fg);background:var(--bg)}
+ h1{font:700 1.6rem 'Cinzel',Georgia,serif;color:var(--gold);letter-spacing:.06em;margin:0 0 .2rem}
+ a{color:var(--gold)} .muted{color:var(--muted)} .on{color:var(--on)}
+ .who{display:flex;align-items:center;gap:.5rem;margin:.1rem 0 1.4rem;color:var(--muted);font-size:.9rem}
+ .avatar{width:1.6rem;height:1.6rem;border-radius:3px;border:1px solid var(--line)}
+ .wrap{overflow-x:auto}
+ table{border-collapse:collapse;width:100%;background:var(--panel);border:1px solid var(--line);border-radius:3px}
+ th,td{text-align:left;padding:.45rem .6rem;border-bottom:1px solid var(--line);white-space:nowrap}
+ tr:last-child td{border-bottom:0}
+ th{background:var(--panel-2);font:600 .72rem 'Cinzel',Georgia,serif;color:var(--gold-dim);
+  letter-spacing:.06em;text-transform:uppercase}
+ td.act{text-align:right} td.act form{display:inline}
+ button{font:inherit;font-size:.82rem;color:var(--gold-dim);background:none;cursor:pointer;
+  border:1px solid var(--line);border-radius:3px;padding:.1rem .55rem;margin-left:.3rem}
+ button:hover{border-color:var(--bronze);color:var(--gold)}
+ .badge{font:600 .72rem 'Cinzel',Georgia,serif;color:var(--gold);letter-spacing:.06em;
+  text-transform:uppercase;border:1px solid var(--bronze);border-radius:3px;padding:.1rem .5rem}
+ .empty{background:var(--panel);border:1px solid var(--line);border-radius:3px;padding:.9rem 1rem;
+  color:var(--muted)}
+ tr.off td{opacity:.45}
+ p.note{color:var(--muted);font-size:.85rem}
+</style></head><body>
+<h1>Your characters</h1>
+<div class="who">__WHO__ &middot; <a href="/">back to the dashboard</a></div>
+__BODY__
+__LEAD__
+<p class="note">Only characters this Steam account has been seen playing are listed &mdash; Skald
+ reads that pairing from the server&rsquo;s own log, so there is nothing to type in, nothing to
+ prove, and no way to take a character you have not played. None of it is public: your
+ characters are not shown on the dashboard or in the API, and no Steam ID ever is.</p>
+<script>
+ const f=new Intl.DateTimeFormat(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
+ for(const el of document.querySelectorAll('time[data-ts]'))
+  el.textContent=f.format(new Date(el.dataset.ts*1000));
+</script>
+</body></html>"""
+
+
 def render_diagnostics(d):
     rows = []
     for name, info in d["paths"].items():
@@ -1690,8 +1846,13 @@ def sign_in_widget(user):
         return ""
     if user:
         name = html.escape(user["display_name"] or f'Steam {user["steam_id"][-4:]}')
+        # The character is what a player recognises themselves by here; the
+        # Steam persona is only how they signed in.
+        who = (f'<b>{html.escape(user["character"])}</b> <span>({name})</span>'
+               if user.get("character") else f'<b>{name}</b>')
         return ('<form class="who" method="post" action="/auth/logout">'
-                f'<span>signed in as <b>{name}</b></span>'
+                f'<span>signed in as {who}</span>'
+                '<a class="signin" href="/me">your characters</a>'
                 '<button type="submit">sign out</button></form>')
     return '<a class="who signin" href="/auth/login">sign in through Steam</a>'
 
@@ -1720,15 +1881,46 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", "0")
         self.end_headers()
 
+    def _form(self):
+        """The posted form, capped: this is an unauthenticated entry point."""
+        try:
+            length = min(int(self.headers.get("Content-Length") or 0), 4096)
+        except ValueError:
+            return {}
+        body = self.rfile.read(length).decode("utf-8", "replace")
+        return {k: v[0] for k, v in urllib.parse.parse_qs(body).items()}
+
     def do_POST(self):
-        # Signing out changes state, so it is a POST -- and SameSite=Lax
-        # keeps another site from making your browser do it.
-        if self.path.split("?")[0] == "/auth/logout" and CONFIG.steam_login:
+        # Everything that changes state is a POST -- and SameSite=Lax keeps
+        # another site from making your browser do it with your cookie.
+        path = self.path.split("?")[0]
+        if not CONFIG.steam_login:
+            return self._send(404, "not found", "text/plain")
+        if path == "/auth/logout":
             token = auth.token_from_cookies(self.headers.get("Cookie"))
             if token:
                 store.end_session(db(), auth.token_hash(token))
             return self._redirect("/", auth.clear_cookie_header(CONFIG.secure_cookies))
+        if path in ("/me/primary", "/me/hide", "/me/mine"):
+            return self._me_post(path)
         self._send(404, "not found", "text/plain")
+
+    def _me_post(self, path):
+        user = current_user(self.headers)
+        if not user:
+            return self._send(403, "sign in first", "text/plain")
+        name = self._form().get("name", "")
+        conn, steam_id = db(), user["steam_id"]
+        # The check that matters, and the only one: the log has to agree this
+        # account played that character. Rows exist for nothing else, so a
+        # name that was never synced simply misses every statement below.
+        if name:
+            if path == "/me/primary":
+                store.set_primary(conn, steam_id, name)
+            else:
+                store.hide_character(conn, steam_id, name, path == "/me/hide")
+                sync_user(conn, user, history(), time.time())
+        return self._redirect("/me")
 
     def do_GET(self):
         path, _, query = self.path.partition("?")
@@ -1781,8 +1973,22 @@ class Handler(BaseHTTPRequestHandler):
                                        if not requested or m["world"] == world]})
         elif path == "/api/daily":
             self._json({"days": daily(hw, now, max(1, min(arg("days", CHART_DAYS), 366)))})
+        elif path == "/me":
+            user = current_user(self.headers)
+            if not user:
+                return self._redirect("/auth/login" if CONFIG.steam_login else "/")
+            mine = sync_user(db(), user, h, now)
+            self._send(200, render_me(user, mine,
+                                      store.characters(db(), user["steam_id"])),
+                       "text/html; charset=utf-8")
         elif path in ("/", "/index.html"):
-            self._send(200, render(h, now, world, current_user(self.headers)),
+            user = current_user(self.headers)
+            if user:
+                # Here as well as on /me, so someone who signs in and never
+                # opens that page is still called by their character -- and
+                # so a character played since is picked up.
+                sync_user(db(), user, h, now)
+            self._send(200, render(h, now, world, user),
                        "text/html; charset=utf-8")
         else:
             self._send(404, "not found", "text/plain")

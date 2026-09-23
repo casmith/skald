@@ -23,12 +23,17 @@ from datetime import UTC, datetime
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from skald import app, config  # noqa: E402
+from skald import app, config, store  # noqa: E402
 
 WORLDS = ["Midgard", "Utgard"]
 # Invented players, with the shape of a real group: one who is always on,
 # a couple of regulars, someone who visits.
 PLAYERS = [("Alfr", 4), ("Bera", 3), ("Cnut", 2), ("Dagny", 1)]
+# One player with a second character, because that is the case worth seeing:
+# Skald works out which characters a Steam account plays and calls them by
+# the one they play most, and there is nothing to look at unless someone has
+# two. Every fifth session, Alfr plays Sigrun instead.
+ALTS = {"Alfr": "Sigrun"}
 KEYS = {"Midgard": ["defeated_eikthyr", "defeated_gdking", "killedtroll",
                     "defeated_writhan"],
         "Utgard": ["defeated_eikthyr"]}
@@ -50,6 +55,9 @@ def sessions(rng, world, now, days=30):
                 continue
             steam = f"7656119000000000{i + 1}"
             length = rng.randint(40, 200) * 60
+            alt = ALTS.get(player)
+            if alt and rng.random() < 0.2:
+                player = alt
             lines.append(f"{stamp(start)}: Got connection SteamID {steam}")
             lines.append(f"{stamp(start + 20)}: Got character ZDOID from {player} "
                          f": {rng.randint(1000, 9999)}:1")
@@ -135,7 +143,17 @@ def render(cfg, into, now):
         app.STATUS[world] = {"up": True, "count": 2 - i, "status_ts": now,
                              "error": None, "game_version": "1.0.15"}
     h = app.history()
+    # A signed-in player, so the characters page has something to show. The
+    # Steam account is the invented one sessions() gives Alfr, who also plays
+    # Sigrun -- which is the whole point of that page.
+    steam = "76561190000000001"
+    store.put_user(app.db(), steam, {"display_name": "alfr"}, now)
+    user = {"steam_id": steam, "display_name": "alfr", "avatar": "",
+            "character": None}
+    mine = app.sync_user(app.db(), user, h, now)
     pages = {"dashboard.html": app.render(h, now, "Midgard"),
+             "characters.html": app.render_me(
+                 user, mine, store.characters(app.db(), steam)),
              "diagnostics.html": app.render_diagnostics(app.diagnostics(h, now))}
     pages["forecast.html"] = pages["dashboard.html"].replace(
         '<details class="forecast">', '<details class="forecast" open>')

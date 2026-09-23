@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+## 0.3.0
+
+- **Your characters, worked out rather than claimed.** A Valheim log names
+  characters, not accounts — but a connection logs a SteamID and the
+  character that follows it is whoever that connection turned out to be, so
+  Skald knows the pairing already. `/me` lists the characters your Steam
+  account has been seen playing, and **your most-played one is your primary
+  automatically**. Pick a different one and it stays put; mark one as not
+  yours and it stops being offered.
+- There is nothing to type in, deliberately: on a public instance a
+  free-form claim would let anyone take any name. Taking a character here
+  means having the Steam account that played it.
+- Your characters are **private** — never on the dashboard, never in the
+  API, and no Steam ID ever is. The only public effect of signing in is that
+  the page greets you by your character's name instead of your Steam
+  persona.
+- `tools/demo.py` now gives a player a second character and renders the page,
+  so the screenshot is made the same way every other one is.
+
 ## 0.2.0
 
 - **Skald no longer needs the lloesche image.** A world can name its own
