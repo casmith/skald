@@ -2,13 +2,20 @@
 
 The honest list, so nothing here is a surprise.
 
-## It only works with one server image, for now
+## Getting events in
 
-Events reach Skald through a log hook that the
-[`lloesche/valheim-server`](https://github.com/lloesche/valheim-server-docker)
-image provides. A vanilla or systemd server writes the same lines to its own
-log, and reading that directly is the next thing on the
-[roadmap](../ROADMAP.md) — until then, Skald has no way in.
+Two ways, and one of them has a caveat:
+
+- **The log hook**, from the
+  [`lloesche/valheim-server`](https://github.com/lloesche/valheim-server-docker)
+  image: it writes only the lines Skald wants, so an update that rewords one
+  shows up as a count on `/diagnostics` rather than as silence.
+- **A server's own log file**, for vanilla and systemd installs. Works just
+  as well, but Skald cannot tell a reworded line from the ordinary noise
+  there, so it loses that early-warning signal.
+
+Pointing it at a *container's* json log works but is fragile: the path holds
+the container id, so recreating the container moves it.
 
 ## It cannot know what happened before it arrived
 

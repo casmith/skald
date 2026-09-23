@@ -5,11 +5,12 @@ log hook writes, each world's save directory, and (optionally) your backups.
 
 ## Requirements
 
-- **Docker**, and game servers running the
-  [`lloesche/valheim-server`](https://github.com/lloesche/valheim-server-docker)
-  image. That image can run a command on log lines matching a pattern, which
-  is how events reach Skald. Other server setups are not supported yet — see
-  [limitations](limitations.md).
+- **Docker**, and either:
+  - game servers running the
+    [`lloesche/valheim-server`](https://github.com/lloesche/valheim-server-docker)
+    image, whose log hook feeds Skald directly — the tidiest option; or
+  - **any server that writes its log to a file**, which Skald reads instead.
+    See [reading a server's log](#reading-a-servers-log-instead).
 - Each game server needs `STATUS_HTTP: "true"`, which Skald polls to notice
   crashes and to read the game version.
 
@@ -76,6 +77,33 @@ docker exec -i skald sh -c 'cat > /events/Midgard.backfill.log' < midgard.backfi
 
 Skald deduplicates on the line itself, so an overlap with the live file is
 harmless.
+
+## Reading a server's log instead
+
+A vanilla or systemd Valheim server writes the same lines Skald wants, mixed
+in with everything else it says. Point a world at that file and the hook is
+not needed at all:
+
+```toml
+[[worlds]]
+name = "Midgard"
+status_url = "http://192.168.1.10:2457/status.json"
+log_file = "/logs/midgard.log"
+```
+
+or `SKALD_LOG_FILES="Midgard=/logs/midgard.log"`. Mount the file (or its
+directory) read-only into the container. Skald reads it incrementally, skips
+everything that is not an event, and unwraps a container's json log format
+if it finds one.
+
+**A container's json log is a poor thing to point at**, even though it
+works: its path contains the container's id, so it changes every time the
+container is recreated, and the old path is left behind — as an empty
+directory, if you mounted it. For containers, use the hook. This mode is for
+servers that write a log at a path of your choosing.
+
+Skald never writes to a log it reads, and read-only mounts are the way to
+keep it that way.
 
 ## What to expect at first
 

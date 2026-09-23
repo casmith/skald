@@ -108,6 +108,8 @@ def ingest(conn, path, world, parse_line, is_log_line=None):
         st = os.stat(path)
     except OSError:
         return 0
+    if not os.path.isfile(path):
+        return 0  # a directory where a log should be: see diagnostics
     row = conn.execute("SELECT size, mtime FROM files WHERE path = ?", (path,)).fetchone()
     start = 0
     if row and st.st_size >= row["size"] and st.st_mtime >= row["mtime"]:

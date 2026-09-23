@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 0.2.0
+
+- **Skald no longer needs the lloesche image.** A world can name its own
+  `log_file`, and Skald reads the server's whole log — skipping the noise,
+  reading incrementally, and unwrapping a container's json log format if it
+  finds one. Vanilla and systemd servers work now.
+- A bind mount whose source has gone leaves an empty *directory* behind,
+  which Skald counted as an existing but empty log. It now checks for a
+  file, and says so on `/diagnostics`.
+- Ingesting outside the page's own path left the replay cache stale.
+  Ingestion invalidates it itself, so call order cannot matter.
+
 ## 0.1.1
 
 - **Boss kills are dated to the save interval, and the docs now say so
