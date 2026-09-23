@@ -5,6 +5,11 @@
 # before. `$$` is a literal `$` for the hook's shell.
 #
 # Requires the lloesche/valheim-server image -- see the README's Requirements.
+#
+# Before `docker compose up`, put a server password in a .env file beside
+# this one -- Valheim insists on at least five characters:
+#
+#     echo 'SERVER_PASS=choose-something' > .env
 
 x-skald-hook: &skald-hook
   VALHEIM_LOG_FILTER_REGEXP_Skald: "Got connection SteamID|Got character ZDOID from|Closing socket|OnApplicationQuit|Placed location |Setting global key |Spawning boss "
@@ -27,7 +32,7 @@ services:
       <<: *skald-hook
       SERVER_NAME: "Midgard"
       WORLD_NAME: "Midgard"      # must match TRACKER_SERVERS below
-      SERVER_PASS: "${SERVER_PASS}"
+      SERVER_PASS: "${SERVER_PASS:?set SERVER_PASS in .env: at least 5 characters}"
       STATUS_HTTP: "true"        # Skald polls this to catch crashes
 
   utgard:
@@ -46,19 +51,20 @@ services:
       <<: *skald-hook
       SERVER_NAME: "Utgard"
       WORLD_NAME: "Utgard"
-      SERVER_PASS: "${SERVER_PASS}"
+      SERVER_PASS: "${SERVER_PASS:?set SERVER_PASS in .env: at least 5 characters}"
       STATUS_HTTP: "true"
 
   skald:
-    image: ghcr.io/casmith/skald:latest   # not published yet; build locally for now
+    image: ghcr.io/casmith/skald:0.0.2
+    # ...or build it yourself, from a clone of the repo:
     # build: .
     container_name: skald
     restart: unless-stopped
     ports:
       - "8080:8080"
     volumes:
-      # The hook's event files. Read-write: Skald opens the directory up at
-      # start so the game containers' user can append to it.
+      # The hook's event files. Read-write, and shared with the game
+      # servers: they append, Skald reads.
       - skald_events:/events
       # Its own state: what it has learned about milestones.
       - skald_data:/data
