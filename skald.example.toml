@@ -1,0 +1,24 @@
+# Skald's configuration. Mount it at /config/skald.toml, or point
+# SKALD_CONFIG somewhere else. Every setting can also come from the
+# environment, which wins over this file -- see the README.
+
+# port = 8080
+timezone = "America/Chicago"   # dates, and where a day starts for the charts
+default_world = "Midgard"      # which tab opens first
+
+# Where things are. The defaults match the compose example.
+# events_dir   = "/events"     # the log hook's files, one per world
+# data_dir     = "/data"       # Skald's own state
+# saves_root   = "/saves"      # <root>/<World>/worlds_local/<World>/
+# backups_root = "/nas"        # <root>/<world lowercased>/backups/worlds-*.zip
+
+[[worlds]]
+name = "Midgard"               # must match the game's WORLD_NAME
+status_url = "http://midgard/status.json"
+
+[[worlds]]
+name = "Utgard"
+status_url = "http://utgard/status.json"
+# A world whose files sit somewhere unusual can say so:
+# saves_dir = "/mnt/other/utgard/worlds_local/Utgard"
+# backups_dir = "/mnt/backups/utgard"
