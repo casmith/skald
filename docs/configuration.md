@@ -40,6 +40,9 @@ backups_dir = "/mnt/backups/utgard"
 | `save_scan_seconds` | `SKALD_SAVE_SCAN_SECONDS` | `60` | How often saves are read; backups every tenth scan |
 | `chart_days` | `SKALD_CHART_DAYS` | `30` | Days in the charts and the daily table |
 | `merge_gap_seconds` | `SKALD_MERGE_GAP_SECONDS` | `120` | A rejoin this soon after leaving continues the same session |
+| `base_url` | `SKALD_BASE_URL` | — | The public address people reach Skald at. Setting it turns on sign-in |
+| `steam_api_key` | `SKALD_STEAM_API_KEY` | — | Optional: a free Steam Web API key, for display names and avatars |
+| `session_days` | `SKALD_SESSION_DAYS` | `30` | How long a sign-in lasts |
 
 A world's `saves_dir` and `backups_dir` override the roots for that world
 alone.
@@ -48,6 +51,35 @@ alone.
 `TRACKER_PORT`, `TRACKER_DEFAULT_WORLD`, and the bare `EVENTS_DIR`,
 `DATA_DIR`, `SAVES_ROOT`, `BACKUPS_ROOT`), because Skald grew out of a
 deployment that sets them.
+
+## Sign in through Steam
+
+Optional, and off until `base_url` is set. Skald has to know the public
+address to send people back to, and guessing it would be a way to send them
+somewhere they never came from.
+
+```toml
+base_url = "https://skald.example.com"      # exactly as people reach it
+steam_api_key = "…"                         # optional, for names and avatars
+```
+
+Behind a reverse proxy, `base_url` is the **outside** address, not the
+container's.
+
+**It is OpenID 2.0, not OAuth2** — Steam has never offered OAuth2 for
+third-party sites. There is nothing to register, no client secret, and no
+approval from Valve. What comes back is a SteamID64 and nothing else: no
+email, no friends, no library, and no ability to act on anyone's behalf.
+
+Skald stores the SteamID, and the display name and avatar if you configured
+an API key. Sessions are a random token in a cookie (`HttpOnly`,
+`SameSite=Lax`, and `Secure` when `base_url` is https); the database keeps
+only a hash of it, so a stolen copy of the database cannot be used to sign
+in as anyone.
+
+Signing in currently adds nothing but a greeting — it is the foundation for
+claiming your character and, later, contributing your map. Nothing about the
+dashboard changes for people who do not sign in.
 
 ## Where a setting came from
 

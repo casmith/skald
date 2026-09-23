@@ -75,9 +75,14 @@ whether Skald has been verified against it.
 ## It shows who is playing, right now
 
 That is the point, and it is also a log of when your friends are at their
-computers. There is no authentication in Skald. Keep it on your own network,
-or put it behind something that authenticates, and think before making it
-public. It exposes no Steam IDs.
+computers. **Signing in does not gate any of it**: Skald has no access
+control, so the dashboard is as public as wherever you host it. Keep it on
+your own network, or put it behind something that authenticates, and think
+before making it public.
+
+The dashboard itself exposes no Steam IDs. If you turn on sign-in, Skald
+stores the SteamID of anyone who signs in, plus their display name and
+avatar if you gave it an API key.
 
 ## Deliberately not planned
 
