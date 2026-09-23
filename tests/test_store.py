@@ -98,7 +98,7 @@ def test_milestones_json_is_imported_once(tmp_path):
     assert store.import_legacy(conn, str(tmp_path)) == 0  # only ever once
 
     state = store.state(conn)["Midgard"]
-    assert state["save"] == {"last": "_main.9", "last_ts": 200.0,
+    assert state["save"] == {"last": "_main.9", "last_ts": 200.0, "version": None,
                              "world_time": 3000.0, "keys": ["defeated_eikthyr"]}
     assert state["live"]["defeated_gdking"] == {"after": 150.0, "by": 200.0}
     assert state["milestones"]["defeated_eikthyr"] == {"after": None, "by": 100.0}
@@ -128,3 +128,34 @@ def test_a_marker_skald_wrote_itself_is_kept(tracker):
     store.add_event(app.db(), WORLD, stamp(T) + ": [skald] no players online",
                     T, 3, "gone", ())
     assert count(app.db()) == 1
+
+
+def test_a_v1_database_migrates_and_keeps_its_rows(tmp_path):
+    """Upgrades run migrations on a database that already has history."""
+    import sqlite3
+
+    path = str(tmp_path / "skald.db")
+    conn = sqlite3.connect(path)
+    conn.row_factory = sqlite3.Row
+    conn.executescript(store.SCHEMA[0])
+    conn.execute("PRAGMA user_version = 1")
+    conn.execute("INSERT INTO events (world, line, ts, prio, kind, args)"
+                 " VALUES ('Midgard', 'a line', 1.0, 0, 'connect', '[]')")
+    conn.commit()
+
+    assert store.migrate(conn) == len(store.SCHEMA)
+    assert conn.execute("SELECT count(*) FROM events").fetchone()[0] == 1
+    # The v2 columns exist and are usable.
+    store.put_save(conn, "Midgard", "_main.1", 5.0, 50.0, ["defeated_eikthyr"], 41)
+    assert store.state(conn)["Midgard"]["save"]["version"] == 41
+
+
+def test_lines_that_look_like_the_game_but_match_nothing_are_counted(tracker):
+    """A Valheim update that rewords a line should not just go quiet."""
+    T = 1_800_000_000
+    path = tracker.dirs["events"] / f"{WORLD}.log"
+    path.write_text("\n".join(join(T, ALFR)) + "\n"
+                    + stamp(T + 5) + ": Some brand new line nobody has seen\n"
+                    + "a line with no timestamp at all\n")
+    app.ingest_events()
+    assert store.skipped_lines(app.db()) == {str(path): 1}
