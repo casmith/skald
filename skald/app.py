@@ -562,7 +562,8 @@ def scan_saves():
         else:
             for k in keys - set(sv["keys"]) - set(live):
                 store.put_milestone(db(), world, k, sv["last_ts"], done, "save")
-        store.put_save(db(), world, name, done, world_time, sorted(keys), save_version)
+        store.put_save(db(), world, name, done, world_time, sorted(keys), save_version,
+                       prev_ts=sv["last_ts"])
 
 
 def milestone_poller():
@@ -1472,6 +1473,11 @@ def diagnostics(h, now):
             "game_version_verified": (game_version or "").startswith(VERIFIED_GAME_VERSIONS),
             "saves": dict(path_info(CONFIG.saves_dir(name)),
                           latest=save.get("last") or None,
+                          # The gap between the last two saves: the precision
+                          # every boss kill without a logged key is dated to.
+                          interval=(round(save["last_ts"] - save["prev_ts"])
+                                    if save.get("prev_ts") and save.get("last_ts")
+                                    else None),
                           version=save.get("version"),
                           version_known=save.get("version") in KNOWN_SAVE_VERSIONS
                           if save.get("version") else None,
@@ -1527,6 +1533,7 @@ def render_diagnostics(d):
         ev, sv, bk = w["events_file"], w["saves"], w["backups"]
         game = (yes_no(w["game_version_verified"], w["game_version"], w["game_version"])
                 if w["game_version"] else DASH)
+        every = (f'every {round(sv["interval"] / 60)}m' if sv.get("interval") else DASH)
         fmt = (yes_no(sv["version_known"], str(sv["version"]), str(sv["version"]))
                if sv["version"] else DASH)
         worlds.append(
@@ -1537,7 +1544,7 @@ def render_diagnostics(d):
             f'<td>{yes_no(bool(sv["latest"]), sv["latest"] or "none", "none")}</td>'
             f'<td>{yes_no(bk["count"] > 0, str(bk["count"]), "0")}</td>'
             f'<td>{w["milestones"]}</td><td>{w["biomes_unlocked"]}</td>'
-            f'<td>{game}</td><td>{fmt}</td></tr>')
+            f'<td>{every}</td><td>{game}</td><td>{fmt}</td></tr>')
     srcs = "".join(f'<tr><td>{html.escape(k)}</td><td class="mono">{html.escape(str(v))}</td></tr>'
                    for k, v in sorted(d["config"]["sources"].items()))
     return (DIAG_PAGE
@@ -1594,10 +1601,13 @@ __PATHS__
  else it reads.</p>
 <h2>Worlds</h2>
 <div class="wrap"><table><thead><tr><th>World</th><th>Status</th><th>Events</th><th>Latest save</th>
- <th>Backups</th><th>Milestones</th><th>Biomes</th><th>Game</th><th>Save fmt</th>
+ <th>Backups</th><th>Milestones</th><th>Biomes</th><th>Saves</th><th>Game</th><th>Save fmt</th>
  </tr></thead><tbody>
 __WORLDS__
 </tbody></table></div>
+<p class="muted">How often a world saves is how precisely a boss kill can be dated, unless the
+ server logs the key being set &mdash; which Valheim 1.0.x does not. Pass
+ <span class="mono">-saveinterval &lt;seconds&gt;</span> to the server to tighten it.</p>
 <p class="muted">No events means the log hook is not reaching Skald: check the game server's
  hook and that both containers share the events volume. No save means the world's directory is
  not mounted, which is what the clock, the weather and 30-minute kill windows come from.</p>

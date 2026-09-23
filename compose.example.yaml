@@ -31,6 +31,10 @@ services:
     environment:
       <<: *skald-hook
       SERVER_NAME: "Midgard"
+      # Boss kills are dated to whenever the world last saved, so saving
+      # more often dates them more precisely -- at the cost of writing the
+      # world out more often. 300 = every 5 minutes; the default is 30.
+      # SERVER_ARGS: "-saveinterval 300"
       WORLD_NAME: "Midgard"      # must match TRACKER_SERVERS below
       SERVER_PASS: "${SERVER_PASS:?set SERVER_PASS in .env: at least 5 characters}"
       STATUS_HTTP: "true"        # Skald polls this to catch crashes

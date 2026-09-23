@@ -99,7 +99,8 @@ def test_milestones_json_is_imported_once(tmp_path):
 
     state = store.state(conn)["Midgard"]
     assert state["save"] == {"last": "_main.9", "last_ts": 200.0, "version": None,
-                             "world_time": 3000.0, "keys": ["defeated_eikthyr"]}
+                             "prev_ts": None, "world_time": 3000.0,
+                             "keys": ["defeated_eikthyr"]}
     assert state["live"]["defeated_gdking"] == {"after": 150.0, "by": 200.0}
     assert state["milestones"]["defeated_eikthyr"] == {"after": None, "by": 100.0}
     assert state["last"] == "worlds-20260101-000000.zip"
@@ -159,3 +160,16 @@ def test_lines_that_look_like_the_game_but_match_nothing_are_counted(tracker):
                     + "a line with no timestamp at all\n")
     app.ingest_events()
     assert store.skipped_lines(app.db()) == {str(path): 1}
+
+
+def test_the_gap_between_saves_is_remembered(tracker):
+    """How often a world saves is the precision a boss kill is dated to."""
+    T = 1_800_000_000
+    tracker.write_save(1, [], T)
+    app.scan_saves()
+    tracker.write_save(2, ["defeated_eikthyr"], T + 300)
+    app.scan_saves()
+    save = app.load_milestones()[WORLD]["save"]
+    assert save["prev_ts"] == T and save["last_ts"] == T + 300
+    h = tracker.write_events(join(T, ALFR))
+    assert app.diagnostics(h, T + 400)["worlds"][0]["saves"]["interval"] == 300

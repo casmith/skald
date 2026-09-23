@@ -50,17 +50,26 @@ A kill sets a permanent global key (`defeated_eikthyr`, `bosshildir1`,
 `killedtroll`, …) that is saved with the world. Skald dates each one from
 the best source it has:
 
-1. **The log**, if the server recorded the key being set: exact, and with
-   the preceding `Spawning boss` line, how long the fight took.
-2. **The autosaves**, read every minute: a key new in one save was set
-   between it and the last, and both times are known exactly — a 30-minute
-   window.
-3. **The hourly backups**: about 90 minutes, but they reach back as far as
+1. **The autosaves**, read every minute: a key new in one save was set
+   between it and the last, and both times are known exactly — so the window
+   is however often the world saves, 30 minutes by default. This is the one
+   that does the work.
+2. **The hourly backups**: about 90 minutes, but they reach back as far as
    your retention, so they date kills from before Skald arrived.
+3. **The log**, if the server ever records the key being set: exact, and
+   with the preceding `Spawning boss` line, how long the fight took. Valheim
+   1.0.x **does not** log it — the message is in the game's code but
+   compiled out of release builds, and the server has no verbosity flag to
+   turn it on. Skald reads it if it ever appears; do not count on it.
 
 A log time is only trusted when it falls inside the save or backup window
 for that key, so a server that re-logs existing keys on restart cannot pass
 one off as a fresh kill.
+
+If you want tighter kill times, save more often: `SERVER_ARGS:
+"-saveinterval 300"` gives five-minute windows instead of thirty, at the
+cost of writing the world out six times as often. `/diagnostics` shows the
+interval each world is actually saving at.
 
 Bosses you have not beaten are never named on the page — the name is not in
 the HTML at all — and biomes unlock as the boss before them falls.
