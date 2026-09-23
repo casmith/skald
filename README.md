@@ -11,6 +11,29 @@ nothing written back to your world.
 > **Status: early.** Working and in daily use on one homelab, but not yet
 > released. See [ROADMAP.md](ROADMAP.md) for what v0.1 needs.
 
+![The dashboard: who is online, the weather, and boss kills as
+badges](docs/screenshots/dashboard.png)
+
+<details>
+<summary><b>The 7-day forecast</b>, and what a phone sees</summary>
+
+![The forecast: 20 weather turns as an icon grid](docs/screenshots/forecast.png)
+
+![The dashboard on a phone](docs/screenshots/phone.png)
+
+</details>
+
+<details>
+<summary><b>The diagnostics page</b>, for when something is missing</summary>
+
+![Diagnostics: paths, worlds, and where each setting came
+from](docs/screenshots/diagnostics.png)
+
+</details>
+
+*(Every name in those shots is invented — see [Trying it without a
+server](#trying-it-without-a-server).)*
+
 ## What it shows
 
 - **Who is online**, per world, and for how long.
@@ -65,6 +88,22 @@ x-skald-hook: &skald-hook
 ```
 
 Then open `http://<host>:8080`.
+
+## Trying it without a server
+
+`tools/demo.py` builds a month of invented history — two worlds, four
+players, sessions, deaths, exploration, a boss falling mid-fight — so you can
+see the thing working before wiring it to a game server:
+
+```sh
+python3 tools/demo.py --out /tmp/skald-demo
+SKALD_EVENTS_DIR=/tmp/skald-demo/events SKALD_DATA_DIR=/tmp/skald-demo/data \
+SKALD_SAVES_ROOT=/tmp/skald-demo/saves \
+SKALD_WORLDS="Midgard=http://none/status.json" python3 -m skald
+```
+
+It is also what the screenshots above are made from, which is deliberate:
+this repository should never need a real player's name in it.
 
 ## Configuration
 
