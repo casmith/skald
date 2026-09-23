@@ -55,7 +55,7 @@ services:
       STATUS_HTTP: "true"
 
   skald:
-    image: ghcr.io/casmith/skald:0.0.2
+    image: ghcr.io/casmith/skald:0.1.0
     # ...or build it yourself, from a clone of the repo:
     # build: .
     container_name: skald

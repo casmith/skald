@@ -8,8 +8,10 @@ It reads what the server already writes — its log and its world saves — and
 serves a single page. No mods, no plugins, nothing installed in the game, and
 nothing written back to your world.
 
-> **Status: early.** Working and in daily use on one homelab, but not yet
-> released. See [ROADMAP.md](ROADMAP.md) for what v0.1 needs.
+> **v0.1** — the first release worth sharing. Running daily on the homelab it
+> grew up in, and installed from scratch on a clean machine to make sure the
+> instructions below are true. See the [roadmap](ROADMAP.md) for what is next
+> and the [limitations](docs/limitations.md) for what it cannot do.
 
 ![The dashboard: who is online, the weather, and boss kills as
 badges](docs/screenshots/dashboard.png)
@@ -49,31 +51,25 @@ server](#trying-it-without-a-server).)*
 
 ## How it knows
 
-Valheim's Steam query reports a *player count* but blanks every name, so
-names have to come from the server log:
+Valheim answers a Steam query with a player *count* and blank names, so the
+names come from the server's own log: a hook copies the handful of lines
+that matter (connections, characters, deaths, landmarks, global keys) into a
+file Skald reads. Boss kills come from the world save, which is also where
+the clock lives — and the weather is *computed* from that clock, because
+Valheim's weather is deterministic.
 
-| What | Where it comes from |
-|---|---|
-| Sessions, deaths | `Got connection SteamID` / `Got character ZDOID from` / `Closing socket` lines. A death is the character "rejoining" as `0:0`. |
-| Exploration | `Placed location` lines: the server logs a zone the first time it generates one with a landmark in it. |
-| Boss kills | Global keys (`defeated_eikthyr`, …) saved with the world. Dated from the log if the server logged the key being set, otherwise from consecutive autosaves, otherwise from hourly backups. |
-| Weather | Computed. Valheim rolls one number per 666 seconds of *world* time and each biome reads it through a weighted table, so a world's clock decides its weather entirely. |
-| The world clock | The double in a save's header, advanced by **online** time — the server stops the clock when a world empties. |
-
-A crash leaves a session with no `Closing socket` line, so Skald also polls
-each world's status endpoint and closes sessions it can prove ended.
+[**How it works**](docs/how-it-works.md) explains all of it, including the
+parts that took some finding: why a death looks like a join, why a missed
+goodbye must not merge two sessions, and why the world clock only runs while
+someone is online.
 
 ## Requirements
 
-**Today Skald only supports servers running the
+**Skald currently supports servers running the
 [`lloesche/valheim-server`](https://github.com/lloesche/valheim-server-docker)
-image**, which can run a hook on matching log lines. That hook is how events
-reach Skald. Reading a plain log file (for vanilla or systemd installs) and
-reading container logs are on the roadmap, and are what most people will
-need — see [ROADMAP.md](ROADMAP.md).
-
-It also needs read access to each world's save directory, and optionally to
-your backups, which let it date kills that happened before Skald was watching.
+image**, whose log hook is how events reach it. Reading a plain log file,
+for vanilla and systemd servers, is next on the [roadmap](ROADMAP.md). It
+also reads each world's save directory, and your backups if you have them.
 
 ## Quick start
 
@@ -201,7 +197,7 @@ game's log hook appends to it as whichever user the game container runs as.
 **Named Docker volumes need nothing**: the image creates both directories
 with the right ownership, and Docker copies that onto a fresh volume.
 
-**Bind mounts, and volumes from before 0.0.3, do need a hand** — they keep
+**Bind mounts, and volumes from before 0.1.0, do need a hand** — they keep
 the host's ownership, which is usually root:
 
 ```sh
@@ -219,6 +215,16 @@ Skald shows player names and who is playing right now. Think before putting
 it on the public internet: it is a log of when your friends are at their
 computers. It is read-only and exposes no Steam IDs, but the sensible default
 is to keep it on your own network or behind an authenticating proxy.
+
+## Documentation
+
+- [Installing](docs/install.md) — from nothing, or alongside servers you
+  already run, plus permissions and upgrades
+- [Configuration](docs/configuration.md) — every setting, and the API
+- [How it works](docs/how-it-works.md) — the log lines, the saves, the clock
+  and the weather
+- [Limitations](docs/limitations.md) — what it cannot do, and why
+- [Changelog](CHANGELOG.md) · [Roadmap](ROADMAP.md)
 
 ## Attribution
 
