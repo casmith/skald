@@ -77,9 +77,24 @@ your backups, which let it date kills that happened before Skald was watching.
 
 ## Quick start
 
-See [`compose.example.yaml`](compose.example.yaml) for a complete file. In
-short: add the log hook to each game server, mount the shared events volume
-and the saves, and run Skald beside them.
+From nothing to a dashboard, on a machine with Docker:
+
+```sh
+curl -fsSLO https://raw.githubusercontent.com/casmith/skald/main/compose.example.yaml
+mv compose.example.yaml compose.yaml
+echo 'SERVER_PASS=choose-something' > .env    # Valheim wants 5+ characters
+docker compose up -d
+```
+
+Then open `http://<host>:8080`.
+
+A brand-new world looks empty, and should: sessions and deaths appear as
+people play, and the in-game clock, the weather and the forecast need the
+world's first autosave, which Valheim writes every 30 minutes. `/diagnostics`
+says which of those it is still waiting for.
+
+The part that matters if you are adding Skald to servers you already run is
+the log hook, which is what feeds it:
 
 ```yaml
 x-skald-hook: &skald-hook
@@ -87,7 +102,10 @@ x-skald-hook: &skald-hook
   ON_VALHEIM_LOG_FILTER_REGEXP_Skald: 'cat >> "/events/$${WORLD_NAME}.log"'
 ```
 
-Then open `http://<host>:8080`.
+Each game server needs that in its environment, the shared `events` volume,
+and `STATUS_HTTP: "true"`; Skald needs the events volume, its own `data`
+volume, and each world's `config` volume mounted read-only at
+`/saves/<WORLD_NAME>`. A world's name must match the game's `WORLD_NAME`.
 
 ## Trying it without a server
 
@@ -176,14 +194,24 @@ than fail quietly when it does, Skald records what it met and shows it on
 
 ## Permissions
 
-Skald runs as an unprivileged user (uid 10001). It only writes to two places:
+Skald runs as an unprivileged user (uid 10001) and writes to two places: its
+own `data_dir`, and nothing in `events_dir` — that one is shared, because the
+game's log hook appends to it as whichever user the game container runs as.
 
-- **`data_dir`**, its own state.
-- **`events_dir`** — not to write events, but to open the directory up so the
-  game's log hook, running as the game container's user, can append to it. A
-  fresh Docker volume is root-owned, so *someone* has to. If Skald cannot,
-  it says so at startup and on `/diagnostics`; `chown` the volume to match,
-  or run Skald with a `user:` that can.
+**Named Docker volumes need nothing**: the image creates both directories
+with the right ownership, and Docker copies that onto a fresh volume.
+
+**Bind mounts, and volumes from before 0.0.3, do need a hand** — they keep
+the host's ownership, which is usually root:
+
+```sh
+chown -R 10001:10001 /path/to/data      # or: docker run --rm -v <volume>:/d alpine chown -R 10001:10001 /d
+chmod 1777 /path/to/events              # shared with the game's hook
+```
+
+If Skald cannot open its database it exits saying so, rather than serving
+pages that fail; `/healthz` answers only when the database is reachable, so
+a "healthy" container is one that actually works.
 
 ## Privacy
 
