@@ -1096,10 +1096,10 @@ def render(h, now, world):
             + '<p class="muted note">An in-game day is 30 minutes of play, and the weather '
             'turns every 11 minutes of it.'
             # Name only the one-weather biomes this world has actually reached.
-            + (' ' + html.escape(", ".join(steady)) + (' has' if len(steady) == 1 else ' have')
-               + ' one weather each, so ' + ('its column' if len(steady) == 1
-                                             else 'their columns') + ' never change.'
-               if steady else "")
+            + (f' {html.escape(steady[0])} has one weather, so its column never changes.'
+               if len(steady) == 1 else
+               f' {html.escape(", ".join(steady))} have one weather each, so their'
+               ' columns never change.' if steady else "")
             + '</p></details>')
         weather_card = (
             f'<section class="card weather">'
