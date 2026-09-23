@@ -65,11 +65,10 @@ someone is online.
 
 ## Requirements
 
-**Skald currently supports servers running the
-[`lloesche/valheim-server`](https://github.com/lloesche/valheim-server-docker)
-image**, whose log hook is how events reach it. Reading a plain log file,
-for vanilla and systemd servers, is next on the [roadmap](ROADMAP.md). It
-also reads each world's save directory, and your backups if you have them.
+Either the [`lloesche/valheim-server`](https://github.com/lloesche/valheim-server-docker)
+image, whose log hook feeds Skald directly, **or any server that writes its
+log to a file** — Skald reads that instead, skipping the noise. It also
+reads each world's save directory, and your backups if you have them.
 
 ## Quick start
 

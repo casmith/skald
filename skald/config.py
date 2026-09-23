@@ -45,6 +45,9 @@ ENV = {
     "merge_gap_seconds": ("SKALD_MERGE_GAP_SECONDS", "MERGE_GAP_SECONDS"),
 }
 WORLDS_ENV = ("SKALD_WORLDS", "TRACKER_SERVERS")
+# "World=/path/to/log,Other=/path" for people who would rather not write the
+# file. Names must match the worlds above.
+LOGS_ENV = ("SKALD_LOG_FILES",)
 INTS = {"port", "poll_seconds", "save_scan_seconds", "chart_days", "merge_gap_seconds"}
 
 
@@ -56,6 +59,11 @@ class World:
     # usual roots. Empty means "work it out from the roots and the name".
     saves_dir: str = ""
     backups_dir: str = ""
+    # The server's own log file, for servers that write one rather than
+    # running the log hook: a vanilla or systemd install, or a container's
+    # json log. Skald reads it the same way, ignoring everything that is not
+    # an event. Empty means this world arrives through the hook.
+    log_file: str = ""
 
 
 @dataclass(frozen=True)
@@ -75,6 +83,10 @@ class Config:
     # Where the settings came from, for the diagnostics page to show.
     path: str = ""
     sources: dict[str, str] = field(default_factory=dict)
+
+    def log_files(self):
+        """world -> server log path, for the worlds configured that way."""
+        return {w.name: w.log_file for w in self.worlds if w.log_file}
 
     def world(self, name):
         for w in self.worlds:
@@ -144,6 +156,13 @@ def load(path=None, env=None):
             worlds, sources["worlds"] = parse_worlds_env(env[var]), f"${var}"
             break
     sources.setdefault("worlds", "none")
+
+    for var in LOGS_ENV:
+        if env.get(var):
+            paths = dict(item.split("=", 1) for item in env[var].split(",") if "=" in item)
+            worlds = tuple(replace(w, log_file=paths.get(w.name, w.log_file)) for w in worlds)
+            sources["log_files"] = f"${var}"
+            break
 
     cfg = Config(**values, worlds=worlds, path=used_path, sources=sources)
     # A default world that names nothing is worse than no default at all.
