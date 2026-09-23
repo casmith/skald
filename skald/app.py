@@ -55,6 +55,7 @@ import urllib.request
 import zipfile
 
 from skald import __version__
+from skald import auth
 from skald import config as configuration
 from skald import store
 from skald import weather
@@ -1045,7 +1046,7 @@ def for_world(h, world):
             for k in ("sessions", "deaths", "explored", "keys", "spawns")}
 
 
-def render(h, now, world):
+def render(h, now, world, user=None):
     status = {w["world"]: w for w in online_now(h, now)}
 
     # Tabs: one per world, each with its live player count. Plain links, so
@@ -1254,6 +1255,7 @@ def render(h, now, world):
             .replace("__DAILY__", "\n".join(day_rows))
             .replace("__RECENT__", "\n".join(recent_rows) or empty(5))
             .replace("__Q__", q)
+            .replace("__WHO__", sign_in_widget(user))
             .replace("__TS__", t(now)))
 
 
@@ -1289,6 +1291,14 @@ PAGE = """<!doctype html>
   color:var(--gold-dim);letter-spacing:.03em}
  h3.world{margin:1rem 0 .5rem;font-size:.85rem;color:var(--muted)}
  .meta,.muted{color:var(--muted)} .meta{text-align:center;font-size:.85rem;margin-bottom:1.5rem}
+ /* Sign-in: one line of chrome, and only when it is configured. */
+ .who{display:flex;justify-content:center;align-items:center;gap:.6rem;margin:-1rem 0 1.2rem;
+  font-size:.82rem;color:var(--muted)}
+ .who b{color:var(--gold-dim);font-weight:400}
+ .who button,.signin{font:inherit;color:var(--gold-dim);background:none;cursor:pointer;
+  border:1px solid var(--line);border-radius:3px;padding:.15rem .6rem;text-decoration:none}
+ .who button:hover,.signin:hover{border-color:var(--bronze);color:var(--gold)}
+ a.signin{display:block;width:fit-content;margin:-1rem auto 1.2rem}
  .panel,.card,table,.chart,.trophy{background:linear-gradient(180deg,#211a12,var(--panel));border:1px solid var(--line);
   border-radius:3px;box-shadow:inset 0 0 0 1px rgba(232,178,90,.05),0 2px 10px rgba(0,0,0,.45)}
  /* World tabs: carved-plank look, gold when selected. */
@@ -1409,6 +1419,7 @@ PAGE = """<!doctype html>
 <div class="meta">updated __TS__ &middot; refreshes every minute &middot;
  <a href="/api/online__Q__">online</a> &middot; <a href="/api/playtime__Q__">playtime</a> &middot;
  <a href="/api/daily__Q__">daily</a> JSON &middot; <a href="/diagnostics">diagnostics</a></div>
+__WHO__
 <nav class="tabs" aria-label="Worlds">__TABS__</nav>
 __CARD__
 __WEATHER__
@@ -1663,6 +1674,28 @@ __SOURCES__
 </body></html>"""
 
 
+def current_user(headers):
+    """The signed-in user behind a request, or None."""
+    if not CONFIG.steam_login:
+        return None
+    token = auth.token_from_cookies(headers.get("Cookie"))
+    if not token:
+        return None
+    return store.session_user(db(), auth.token_hash(token), time.time())
+
+
+def sign_in_widget(user):
+    """The one piece of chrome authentication adds to the page."""
+    if not CONFIG.steam_login:
+        return ""
+    if user:
+        name = html.escape(user["display_name"] or f'Steam {user["steam_id"][-4:]}')
+        return ('<form class="who" method="post" action="/auth/logout">'
+                f'<span>signed in as <b>{name}</b></span>'
+                '<button type="submit">sign out</button></form>')
+    return '<a class="who signin" href="/auth/login">sign in through Steam</a>'
+
+
 class Handler(BaseHTTPRequestHandler):
     # Don't advertise the Python version to the internet.
     server_version = "skald"
@@ -1679,8 +1712,28 @@ class Handler(BaseHTTPRequestHandler):
     def _json(self, obj):
         self._send(200, json.dumps(obj, indent=2), "application/json")
 
+    def _redirect(self, where, cookie=None):
+        self.send_response(303)
+        self.send_header("Location", where)
+        if cookie:
+            self.send_header("Set-Cookie", cookie)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def do_POST(self):
+        # Signing out changes state, so it is a POST -- and SameSite=Lax
+        # keeps another site from making your browser do it.
+        if self.path.split("?")[0] == "/auth/logout" and CONFIG.steam_login:
+            token = auth.token_from_cookies(self.headers.get("Cookie"))
+            if token:
+                store.end_session(db(), auth.token_hash(token))
+            return self._redirect("/", auth.clear_cookie_header(CONFIG.secure_cookies))
+        self._send(404, "not found", "text/plain")
+
     def do_GET(self):
         path, _, query = self.path.partition("?")
+        if path.startswith("/auth/"):
+            return self._auth(path, query)
         if path == "/healthz":
             # Reaching the database is the point: a Skald that cannot is a
             # Skald whose every page fails, and "healthy" would be a lie.
@@ -1729,9 +1782,33 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/daily":
             self._json({"days": daily(hw, now, max(1, min(arg("days", CHART_DAYS), 366)))})
         elif path in ("/", "/index.html"):
-            self._send(200, render(h, now, world), "text/html; charset=utf-8")
+            self._send(200, render(h, now, world, current_user(self.headers)),
+                       "text/html; charset=utf-8")
         else:
             self._send(404, "not found", "text/plain")
+
+    def _auth(self, path, query):
+        if not CONFIG.steam_login:
+            return self._send(404, "sign-in is not configured", "text/plain")
+        if path == "/auth/login":
+            return self._redirect(auth.login_url(CONFIG.base_url))
+        if path == "/auth/callback":
+            # Everything in this query string came from the visitor's
+            # browser. Steam has to vouch for it before it means anything.
+            steam_id = auth.verify(query, CONFIG.base_url)
+            if not steam_id:
+                return self._send(403, "Steam did not confirm that sign-in.",
+                                  "text/plain")
+            when = time.time()
+            store.put_user(db(), steam_id,
+                           auth.fetch_profile(steam_id, CONFIG.steam_api_key), when)
+            token = auth.new_token()
+            store.start_session(db(), auth.token_hash(token), steam_id, when,
+                                when + CONFIG.session_days * 86400)
+            store.expire_sessions(db(), when)
+            return self._redirect("/", auth.cookie_header(
+                token, CONFIG.secure_cookies, CONFIG.session_days))
+        return self._send(404, "not found", "text/plain")
 
     def log_message(self, *a):
         pass  # keep the container logs quiet

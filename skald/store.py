@@ -71,6 +71,25 @@ SCHEMA = [
     """
     ALTER TABLE saves ADD COLUMN prev_ts REAL;
     """,
+    # v4: who is signed in. A session keeps only the hash of its token, so
+    # a stolen copy of this database cannot be used to sign in as anyone.
+    """
+    CREATE TABLE users (
+        steam_id     TEXT PRIMARY KEY,
+        display_name TEXT,
+        avatar       TEXT,
+        first_seen   REAL NOT NULL,
+        last_seen    REAL NOT NULL
+    );
+
+    CREATE TABLE sessions (
+        token_hash TEXT PRIMARY KEY,
+        steam_id   TEXT NOT NULL REFERENCES users(steam_id),
+        created    REAL NOT NULL,
+        expires    REAL NOT NULL
+    );
+    CREATE INDEX sessions_by_expiry ON sessions (expires);
+    """,
 ]
 
 
@@ -218,6 +237,44 @@ def put_backup(conn, world, name, ts):
             "INSERT INTO saves (world, backup, backup_ts) VALUES (?, ?, ?)"
             " ON CONFLICT(world) DO UPDATE SET backup = ?, backup_ts = ?",
             (world, name, ts, name, ts))
+
+
+def put_user(conn, steam_id, profile, when):
+    with conn:
+        conn.execute(
+            "INSERT INTO users (steam_id, display_name, avatar, first_seen, last_seen)"
+            " VALUES (?, ?, ?, ?, ?)"
+            " ON CONFLICT(steam_id) DO UPDATE SET last_seen = ?,"
+            " display_name = coalesce(nullif(?, ''), display_name),"
+            " avatar = coalesce(nullif(?, ''), avatar)",
+            (steam_id, profile.get("display_name", ""), profile.get("avatar", ""),
+             when, when, when, profile.get("display_name", ""), profile.get("avatar", "")))
+
+
+def start_session(conn, token_hash, steam_id, created, expires):
+    with conn:
+        conn.execute("INSERT OR REPLACE INTO sessions (token_hash, steam_id, created,"
+                     " expires) VALUES (?, ?, ?, ?)",
+                     (token_hash, steam_id, created, expires))
+
+
+def session_user(conn, token_hash, when):
+    """The signed-in user behind a session token, if it is still good."""
+    row = conn.execute(
+        "SELECT u.steam_id, u.display_name, u.avatar FROM sessions s"
+        " JOIN users u ON u.steam_id = s.steam_id"
+        " WHERE s.token_hash = ? AND s.expires > ?", (token_hash, when)).fetchone()
+    return dict(row) if row else None
+
+
+def end_session(conn, token_hash):
+    with conn:
+        conn.execute("DELETE FROM sessions WHERE token_hash = ?", (token_hash,))
+
+
+def expire_sessions(conn, when):
+    with conn:
+        conn.execute("DELETE FROM sessions WHERE expires <= ?", (when,))
 
 
 def import_legacy(conn, data_dir):

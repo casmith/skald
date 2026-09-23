@@ -51,7 +51,7 @@ The work that turns "runs in my homelab" into "runs in yours".
 Identity only: the site stays as readable as you configure it, and signing in
 adds personal features. Nothing changes for people who do not.
 
-- [ ] OpenID 2.0 — Steam does not offer OAuth2 for third-party sites; sign-in
+- [x] OpenID 2.0 — Steam does not offer OAuth2 for third-party sites; sign-in
       returns a SteamID64 and nothing else
 - [ ] Claim your character, so a Steam account and a character name are linked
 - [ ] A personal view: your playtime, your deaths, your sessions

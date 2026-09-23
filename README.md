@@ -47,6 +47,8 @@ server](#trying-it-without-a-server).)*
 - **In-game weather** for each biome you have reached, the day/night phase,
   and a 7-day forecast.
 - **Charts** of player-hours, deaths and exploration per day.
+- **Optional sign-in through Steam**, which adds personal features without
+  changing anything for people who do not.
 - JSON for all of it, if you would rather build your own view.
 
 ## How it knows

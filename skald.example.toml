@@ -22,3 +22,10 @@ status_url = "http://utgard/status.json"
 # A world whose files sit somewhere unusual can say so:
 # saves_dir = "/mnt/other/utgard/worlds_local/Utgard"
 # backups_dir = "/mnt/backups/utgard"
+
+# Sign in through Steam -- optional, and off until base_url is set. It is
+# OpenID 2.0: nothing to register, no client secret, and all it returns is a
+# SteamID. Behind a proxy, base_url is the address people actually use.
+# base_url = "https://skald.example.com"
+# steam_api_key = "..."     # optional, for display names and avatars
+# session_days = 30
