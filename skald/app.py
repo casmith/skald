@@ -53,35 +53,38 @@ import urllib.parse
 import urllib.request
 import zipfile
 
+from skald import __version__
+from skald import config as configuration
 from skald import weather
 from datetime import datetime, timedelta, UTC
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+# Settings come from a TOML file and the environment -- see config.py. They
+# are unpacked into module-level names here because everything below reads
+# them as constants, and because tests can then point one at a temp dir.
+CONFIG = configuration.load()
+
 try:
     from zoneinfo import ZoneInfo
-    LOCAL_TZ = ZoneInfo(os.environ.get("TRACKER_TZ", "America/Chicago"))
-except Exception:  # no tzdata in the image: days are UTC days instead
+    LOCAL_TZ = ZoneInfo(CONFIG.timezone)
+except Exception:  # unknown zone, or no tzdata: days are UTC days instead
     LOCAL_TZ = UTC
 
-PORT = int(os.environ.get("TRACKER_PORT", "8080"))
-EVENTS_DIR = os.environ.get("EVENTS_DIR", "/events")
-DATA_DIR = os.environ.get("DATA_DIR", "/data")
-POLL_SECONDS = int(os.environ.get("POLL_SECONDS", "60"))
+PORT = CONFIG.port
+EVENTS_DIR = CONFIG.events_dir
+DATA_DIR = CONFIG.data_dir
+POLL_SECONDS = CONFIG.poll_seconds
 # A drop-and-rejoin inside this many seconds is one session, not two.
-MERGE_GAP = int(os.environ.get("MERGE_GAP_SECONDS", "120"))
+MERGE_GAP = CONFIG.merge_gap_seconds
 # A connection that never picks a character within this long is abandoned
 # (wrong password, version mismatch) and must not claim a later player's name.
 PENDING_TTL = 300
-CHART_DAYS = 30
-# "World=http://host/status.json,..." -- World must match the game container's
-# WORLD_NAME, which is what the hook names its events file after.
-# The tab the page opens on. Defaults to the first world in TRACKER_SERVERS.
-DEFAULT_WORLD = os.environ.get("TRACKER_DEFAULT_WORLD", "")
-SERVERS = dict(
-    item.split("=", 1)
-    for item in os.environ.get("TRACKER_SERVERS", "").split(",")
-    if "=" in item
-)
+CHART_DAYS = CONFIG.chart_days
+# World -> status URL. A world's name must match the game's WORLD_NAME, which
+# is what the log hook names its events file after.
+SERVERS = {w.name: w.status_url for w in CONFIG.worlds}
+# The tab the page opens on; the first world when unset.
+DEFAULT_WORLD = CONFIG.default_world
 
 WINDOWS = [("24h", 86400), ("7d", 7 * 86400), ("30d", 30 * 86400)]
 
@@ -96,10 +99,10 @@ WINDOWS = [("24h", 86400), ("7d", 7 * 86400), ("30d", 30 * 86400)]
 #      14 days, so they date what happened before 1 and 2 were watching.
 # What 2 and 3 find is kept in MILESTONE_FILE: saves roll over and backups
 # are pruned, and a milestone must outlive the files that dated it.
-BACKUPS_ROOT = os.environ.get("BACKUPS_ROOT", "/nas")
-SAVES_ROOT = os.environ.get("SAVES_ROOT", "/saves")
+BACKUPS_ROOT = CONFIG.backups_root
+SAVES_ROOT = CONFIG.saves_root
 MILESTONE_FILE = os.path.join(DATA_DIR, "milestones.json")
-SAVE_SCAN_SECONDS = 60
+SAVE_SCAN_SECONDS = CONFIG.save_scan_seconds
 BACKUP_SCAN_EVERY = 10  # save scans, i.e. every 10 minutes
 # A boss summoned this long before its kill counts as that fight's start.
 FIGHT_MAX_SECONDS = 3600
@@ -184,6 +187,28 @@ def parse_line(line):
         if em:
             return ts, prio, kind, em.groups(), body
     return None
+
+
+def apply_config(cfg):
+    """Point the module at a different config: used by main() and by tests."""
+    global CONFIG, LOCAL_TZ, PORT, EVENTS_DIR, DATA_DIR, POLL_SECONDS, MERGE_GAP
+    global CHART_DAYS, SERVERS, DEFAULT_WORLD, BACKUPS_ROOT, SAVES_ROOT
+    global MILESTONE_FILE, SAVE_SCAN_SECONDS
+    CONFIG = cfg
+    try:
+        from zoneinfo import ZoneInfo
+        LOCAL_TZ = ZoneInfo(cfg.timezone)
+    except Exception:
+        LOCAL_TZ = UTC
+    PORT, EVENTS_DIR, DATA_DIR = cfg.port, cfg.events_dir, cfg.data_dir
+    POLL_SECONDS, MERGE_GAP = cfg.poll_seconds, cfg.merge_gap_seconds
+    CHART_DAYS, SAVE_SCAN_SECONDS = cfg.chart_days, cfg.save_scan_seconds
+    BACKUPS_ROOT, SAVES_ROOT = cfg.backups_root, cfg.saves_root
+    SERVERS = {w.name: w.status_url for w in cfg.worlds}
+    DEFAULT_WORLD = cfg.default_world
+    MILESTONE_FILE = os.path.join(cfg.data_dir, "milestones.json")
+    _CACHE.update(sig=None, history=None)
+    return cfg
 
 
 def event_paths():
@@ -441,7 +466,7 @@ def scan_backups():
     state = load_milestones()
     for world in SERVERS:
         st = state.setdefault(world, {"last": "", "last_ts": None, "milestones": {}})
-        pattern = os.path.join(BACKUPS_ROOT, world.lower(), "backups", "worlds-*.zip")
+        pattern = os.path.join(CONFIG.backups_dir(world), "worlds-*.zip")
         for path in sorted(glob.glob(pattern)):
             name = os.path.basename(path)
             m = BACKUP_NAME_RE.search(name)
@@ -468,7 +493,7 @@ def latest_save(world):
     A save is _main.<n>.{db2,fwl2,chunks,ok}; the .ok is written once the
     rest is on disk, so its mtime is when that save completed.
     """
-    d = os.path.join(SAVES_ROOT, world, "worlds_local", world)
+    d = CONFIG.saves_dir(world)
     best = None
     for ok in glob.glob(os.path.join(d, "_main.*.ok")):
         m = re.search(r"_main\.(\d+)\.ok$", ok)
@@ -1331,7 +1356,7 @@ PAGE = """<!doctype html>
 </svg>
 <div class="meta">updated __TS__ &middot; refreshes every minute &middot;
  <a href="/api/online__Q__">online</a> &middot; <a href="/api/playtime__Q__">playtime</a> &middot;
- <a href="/api/daily__Q__">daily</a> JSON</div>
+ <a href="/api/daily__Q__">daily</a> JSON &middot; <a href="/diagnostics">diagnostics</a></div>
 <nav class="tabs" aria-label="Worlds">__TABS__</nav>
 __CARD__
 __WEATHER__
@@ -1395,6 +1420,137 @@ __RECENT__
 </body></html>"""
 
 
+def path_info(path, want_write=False):
+    """Whether Skald can actually use a path, which is most of diagnosing it."""
+    info = {"path": path, "exists": os.path.isdir(path),
+            "readable": os.access(path, os.R_OK | os.X_OK)}
+    if want_write:
+        info["writable"] = os.access(path, os.W_OK)
+    return info
+
+
+def diagnostics(h, now):
+    """What Skald can see, per world: the answer to "why is X missing?"."""
+    with LOCK:
+        status = dict(STATUS)
+    state = load_milestones()
+    worlds = []
+    for name in worlds_of(h):
+        events = os.path.join(EVENTS_DIR, f"{name}.log")
+        evs = [e for e in h["sessions"] if e["world"] == name]
+        st = status.get(name, {})
+        save = state.get(name, {}).get("save") or {}
+        backups = sorted(glob.glob(os.path.join(CONFIG.backups_dir(name), "worlds-*.zip")))
+        clock = world_clock(h, name, now)
+        worlds.append({
+            "world": name,
+            "status_url": CONFIG.world(name).status_url,
+            "status": ("up" if st.get("up") else "down" if st else "not polled yet"),
+            "status_error": st.get("error"),
+            "events_file": {"path": events, "exists": os.path.exists(events),
+                            "sessions_seen": len(evs)},
+            "saves": dict(path_info(CONFIG.saves_dir(name)),
+                          latest=save.get("last") or None,
+                          world_clock=round(clock) if clock is not None else None),
+            "backups": dict(path_info(CONFIG.backups_dir(name)), count=len(backups),
+                            newest=os.path.basename(backups[-1]) if backups else None),
+            "milestones": len([m for m in milestones(h) if m["world"] == name]),
+            "biomes_unlocked": len(unlocked_biomes(h, name)),
+        })
+    return {
+        "version": __version__,
+        "config": {"path": CONFIG.path or "none (environment and defaults only)",
+                   "timezone": CONFIG.timezone, "sources": CONFIG.sources},
+        "paths": {"events": path_info(EVENTS_DIR, want_write=True),
+                  "data": path_info(DATA_DIR, want_write=True),
+                  "saves_root": path_info(SAVES_ROOT),
+                  "backups_root": path_info(BACKUPS_ROOT)},
+        "worlds": worlds,
+    }
+
+
+def yes_no(ok, good="yes", bad="no"):
+    cls = "ok" if ok else "bad"
+    return f'<span class="{cls}">{good if ok else bad}</span>'
+
+
+def render_diagnostics(d):
+    rows = []
+    for name, info in d["paths"].items():
+        rows.append(
+            f'<tr><td>{html.escape(name)}</td><td class="mono">{html.escape(info["path"])}</td>'
+            f'<td>{yes_no(info["exists"])}</td><td>{yes_no(info["readable"])}</td>'
+            f'<td>{yes_no(info["writable"]) if "writable" in info else "&mdash;"}</td></tr>')
+    worlds = []
+    for w in d["worlds"]:
+        ev, sv, bk = w["events_file"], w["saves"], w["backups"]
+        worlds.append(
+            f'<tr><td>{html.escape(w["world"])}</td>'
+            f'<td>{yes_no(w["status"] == "up", w["status"], w["status"])}</td>'
+            f'<td>{yes_no(ev["exists"])} <span class="muted">{ev["sessions_seen"]} '
+            f'session{"" if ev["sessions_seen"] == 1 else "s"}</span></td>'
+            f'<td>{yes_no(bool(sv["latest"]), sv["latest"] or "none", "none")}</td>'
+            f'<td>{yes_no(bk["count"] > 0, str(bk["count"]), "0")}</td>'
+            f'<td>{w["milestones"]}</td><td>{w["biomes_unlocked"]}</td></tr>')
+    srcs = "".join(f'<tr><td>{html.escape(k)}</td><td class="mono">{html.escape(str(v))}</td></tr>'
+                   for k, v in sorted(d["config"]["sources"].items()))
+    return (DIAG_PAGE
+            .replace("__VERSION__", html.escape(d["version"]))
+            .replace("__CONFIG_PATH__", html.escape(d["config"]["path"]))
+            .replace("__PATHS__", "\n".join(rows))
+            .replace("__WORLDS__", "\n".join(worlds) or
+                     '<tr><td colspan="7" class="muted">no worlds configured</td></tr>')
+            .replace("__SOURCES__", srcs))
+
+
+DIAG_PAGE = """<!doctype html>
+<html><head><meta charset="utf-8"><title>Diagnostics &middot; Skald</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Averia+Serif+Libre:wght@400;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700&display=swap" rel="stylesheet">
+<style>
+ :root{color-scheme:dark;--bg:#0e0b08;--panel:#1c1610;--panel-2:#241c14;--line:#3b2e20;
+  --gold:#e8b25a;--gold-dim:#cfa266;--fg:#eadcc0;--muted:#a8977a;--ok:#8fc46a;--bad:#e07a5f}
+ body{font:15px/1.5 'Averia Serif Libre',Georgia,serif;margin:0 auto;max-width:56rem;
+  padding:1.75rem 1rem 3rem;color:var(--fg);background:var(--bg)}
+ h1{font:700 1.6rem 'Cinzel',Georgia,serif;color:var(--gold);letter-spacing:.06em;margin:0 0 .2rem}
+ h2{font:600 1rem 'Cinzel',Georgia,serif;color:var(--gold);letter-spacing:.05em;margin:1.8rem 0 .6rem}
+ a{color:var(--gold)} .muted{color:var(--muted)} .mono{font-family:ui-monospace,monospace;font-size:.85rem}
+ .ok{color:var(--ok)} .bad{color:var(--bad)}
+ .wrap{overflow-x:auto}
+ table{border-collapse:collapse;width:100%;background:var(--panel);border:1px solid var(--line);border-radius:3px}
+ th,td{text-align:left;padding:.4rem .6rem;border-bottom:1px solid var(--line);white-space:nowrap}
+ tr:last-child td{border-bottom:0}
+ th{background:var(--panel-2);font:600 .72rem 'Cinzel',Georgia,serif;color:var(--gold-dim);
+  letter-spacing:.06em;text-transform:uppercase}
+</style></head><body>
+<h1>Diagnostics</h1>
+<p class="muted">Skald __VERSION__ &middot; config: <span class="mono">__CONFIG_PATH__</span>
+ &middot; <a href="/">back to the dashboard</a> &middot; <a href="/api/diagnostics">json</a></p>
+<h2>Paths</h2>
+<div class="wrap"><table><thead><tr><th>What</th><th>Path</th><th>Exists</th><th>Readable</th>
+ <th>Writable</th></tr></thead><tbody>
+__PATHS__
+</tbody></table></div>
+<p class="muted">Skald only needs to write to <b>events</b> (to open the directory up for the
+ game's log hook, which runs as a different user) and <b>data</b> (its own state). Everything
+ else it reads.</p>
+<h2>Worlds</h2>
+<div class="wrap"><table><thead><tr><th>World</th><th>Status</th><th>Events</th><th>Latest save</th>
+ <th>Backups</th><th>Milestones</th><th>Biomes</th></tr></thead><tbody>
+__WORLDS__
+</tbody></table></div>
+<p class="muted">No events means the log hook is not reaching Skald: check the game server's
+ hook and that both containers share the events volume. No save means the world's directory is
+ not mounted, which is what the clock, the weather and 30-minute kill windows come from.</p>
+<h2>Where each setting came from</h2>
+<div class="wrap"><table><thead><tr><th>Setting</th><th>Source</th></tr></thead><tbody>
+__SOURCES__
+</tbody></table></div>
+</body></html>"""
+
+
 class Handler(BaseHTTPRequestHandler):
     # Don't advertise the Python version to the internet.
     server_version = "skald"
@@ -1440,6 +1596,11 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"sessions": recent(hw, now, arg("limit", 100))})
         elif path == "/api/deaths":
             self._json({"deaths": list(reversed(hw["deaths"][-arg("limit", 100):]))})
+        elif path == "/api/diagnostics":
+            self._json(diagnostics(h, now))
+        elif path == "/diagnostics":
+            self._send(200, render_diagnostics(diagnostics(h, now)),
+                       "text/html; charset=utf-8")
         elif path == "/api/weather":
             self._json({"worlds": [r for w in worlds_of(h)
                                    if (not requested or w == world)
@@ -1459,14 +1620,28 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
-    # The hooks run as the game containers' uid (1024), and a fresh named
-    # volume is root-owned 0755 -- open it up so their appends succeed.
-    os.makedirs(EVENTS_DIR, exist_ok=True)
-    os.chmod(EVENTS_DIR, 0o1777)
-    os.makedirs(DATA_DIR, exist_ok=True)
+    apply_config(configuration.load())
+    # The game's log hook runs as the game container's own user, and a fresh
+    # named volume is root-owned 0755, so nothing can write to it. Opening it
+    # up needs to be tried, not assumed: Skald itself runs unprivileged, and
+    # a volume someone has already set up correctly is not ours to change.
+    # The diagnostics page says whether it worked.
+    for d in (EVENTS_DIR, DATA_DIR):
+        try:
+            os.makedirs(d, exist_ok=True)
+        except OSError as e:
+            print(f"cannot create {d}: {e}", flush=True)
+    try:
+        os.chmod(EVENTS_DIR, 0o1777)
+    except OSError:
+        if not os.access(EVENTS_DIR, os.W_OK):
+            print(f"note: {EVENTS_DIR} is not writable by this user and could not be "
+                  "opened up; the game's log hook may not be able to write events "
+                  "there. See /diagnostics.", flush=True)
     threading.Thread(target=poller, daemon=True).start()
     threading.Thread(target=milestone_poller, daemon=True).start()
-    print(f"skald listening on :{PORT}, worlds={sorted(SERVERS)}", flush=True)
+    print(f"skald {__version__} listening on :{PORT}, worlds={sorted(SERVERS)}"
+          f", config={CONFIG.path or 'environment and defaults'}", flush=True)
     ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
 
 

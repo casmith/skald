@@ -68,16 +68,52 @@ Then open `http://<host>:8080`.
 
 ## Configuration
 
-| Variable | Default | What |
-|---|---|---|
-| `TRACKER_SERVERS` | — | `World=http://host/status.json`, comma separated. The world name must match the game's `WORLD_NAME`. |
-| `TRACKER_DEFAULT_WORLD` | first listed | Which world's tab opens first. |
-| `TRACKER_PORT` | `8080` | Port to listen on. |
-| `TRACKER_TZ` | `America/Chicago` | Timezone for dates and daily buckets. |
-| `EVENTS_DIR` | `/events` | Where the hook writes its event files. |
-| `DATA_DIR` | `/data` | Skald's own state. |
-| `SAVES_ROOT` | `/saves` | `<SAVES_ROOT>/<World>/worlds_local/<World>/`. |
-| `BACKUPS_ROOT` | `/nas` | `<BACKUPS_ROOT>/<world lowercased>/backups/worlds-*.zip`. Optional. |
+Settings come from a TOML file, with environment variables overriding it.
+Both are optional: the defaults below apply under each. See
+[`skald.example.toml`](skald.example.toml).
+
+```toml
+timezone = "America/Chicago"
+default_world = "Midgard"
+
+[[worlds]]
+name = "Midgard"                 # must match the game's WORLD_NAME
+status_url = "http://midgard/status.json"
+```
+
+Mount it at `/config/skald.toml`, or point `SKALD_CONFIG` elsewhere.
+
+| Setting | Variable | Default | What |
+|---|---|---|---|
+| `worlds` | `SKALD_WORLDS` | — | `Name=http://host/status.json`, comma separated, when you would rather not use the file |
+| `default_world` | `SKALD_DEFAULT_WORLD` | first world | Which tab opens first |
+| `port` | `SKALD_PORT` | `8080` | Port to listen on |
+| `timezone` | `SKALD_TZ` | `UTC` | Dates, and where a day starts for the charts |
+| `events_dir` | `SKALD_EVENTS_DIR` | `/events` | Where the log hook writes |
+| `data_dir` | `SKALD_DATA_DIR` | `/data` | Skald's own state |
+| `saves_root` | `SKALD_SAVES_ROOT` | `/saves` | `<root>/<World>/worlds_local/<World>/` |
+| `backups_root` | `SKALD_BACKUPS_ROOT` | `/nas` | `<root>/<world lowercased>/backups/worlds-*.zip`. Optional |
+
+A world can override `saves_dir` or `backups_dir` if its files sit somewhere
+unusual. The older `TRACKER_*` variable names still work.
+
+## When something is missing
+
+**`/diagnostics`** answers "why is X not showing?" — every path with whether
+it exists and can be read, every world with whether its events, saves and
+backups are arriving, and where each setting came from (file, which variable,
+or the default). `/api/diagnostics` returns the same as JSON.
+
+## Permissions
+
+Skald runs as an unprivileged user (uid 10001). It only writes to two places:
+
+- **`data_dir`**, its own state.
+- **`events_dir`** — not to write events, but to open the directory up so the
+  game's log hook, running as the game container's user, can append to it. A
+  fresh Docker volume is root-owned, so *someone* has to. If Skald cannot,
+  it says so at startup and on `/diagnostics`; `chown` the volume to match,
+  or run Skald with a `user:` that can.
 
 ## Privacy
 
