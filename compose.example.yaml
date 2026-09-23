@@ -1,0 +1,80 @@
+# Skald beside two Valheim servers.
+#
+# Each game server gets a log hook that appends the lines Skald needs to a
+# shared volume, one file per world. The lines still reach `docker logs` as
+# before. `$$` is a literal `$` for the hook's shell.
+#
+# Requires the lloesche/valheim-server image -- see the README's Requirements.
+
+x-skald-hook: &skald-hook
+  VALHEIM_LOG_FILTER_REGEXP_Skald: "Got connection SteamID|Got character ZDOID from|Closing socket|OnApplicationQuit|Placed location |Setting global key |Spawning boss "
+  ON_VALHEIM_LOG_FILTER_REGEXP_Skald: 'cat >> "/events/$${WORLD_NAME}.log"'
+
+services:
+  midgard:
+    image: lloesche/valheim-server
+    container_name: midgard
+    restart: unless-stopped
+    cap_add: [SYS_NICE]
+    stop_grace_period: 120s
+    ports:
+      - "2456-2458:2456-2458/udp"
+    volumes:
+      - midgard_config:/config
+      - midgard_data:/opt/valheim
+      - skald_events:/events
+    environment:
+      <<: *skald-hook
+      SERVER_NAME: "Midgard"
+      WORLD_NAME: "Midgard"      # must match TRACKER_SERVERS below
+      SERVER_PASS: "${SERVER_PASS}"
+      STATUS_HTTP: "true"        # Skald polls this to catch crashes
+
+  utgard:
+    image: lloesche/valheim-server
+    container_name: utgard
+    restart: unless-stopped
+    cap_add: [SYS_NICE]
+    stop_grace_period: 120s
+    ports:
+      - "2466-2468:2456-2458/udp"
+    volumes:
+      - utgard_config:/config
+      - utgard_data:/opt/valheim
+      - skald_events:/events
+    environment:
+      <<: *skald-hook
+      SERVER_NAME: "Utgard"
+      WORLD_NAME: "Utgard"
+      SERVER_PASS: "${SERVER_PASS}"
+      STATUS_HTTP: "true"
+
+  skald:
+    image: ghcr.io/casmith/skald:latest   # not published yet; build locally for now
+    # build: .
+    container_name: skald
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      # The hook's event files. Read-write: Skald opens the directory up at
+      # start so the game containers' user can append to it.
+      - skald_events:/events
+      # Its own state: what it has learned about milestones.
+      - skald_data:/data
+      # Each world's saves, read-only: they carry the world clock, and a key
+      # new in an autosave dates a boss kill to a 30-minute window.
+      - midgard_config:/saves/Midgard:ro
+      - utgard_config:/saves/Utgard:ro
+    environment:
+      TRACKER_SERVERS: "Midgard=http://midgard/status.json,Utgard=http://utgard/status.json"
+      TRACKER_DEFAULT_WORLD: Midgard
+      TRACKER_TZ: America/Chicago
+
+volumes:
+  midgard_config:
+  midgard_data:
+  utgard_config:
+  utgard_data:
+  skald_events:
+  skald_data:

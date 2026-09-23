@@ -1,0 +1,1162 @@
+{
+ "source": "github.com/JereKuusela/valheim-weather (Unlicense), via its own code",
+ "note": "Golden vectors: world time -> weather, wind and clock.",
+ "vectors": [
+  {
+   "time": 0,
+   "clock": "Intro",
+   "wind_angle": 34.29422030092553,
+   "wind_intensity": 0.6576544346975057,
+   "biomes": {
+    "Meadows": "ThunderStorm",
+    "Black Forest": "ThunderStorm",
+    "Swamp": "ThunderStorm",
+    "Mountain": "ThunderStorm",
+    "Plains": "ThunderStorm",
+    "Ocean": "ThunderStorm",
+    "Deep North": "ThunderStorm",
+    "Ashlands": "ThunderStorm",
+    "Mistlands": "ThunderStorm"
+   }
+  },
+  {
+   "time": 1,
+   "clock": "Intro",
+   "wind_angle": 34.29422030092553,
+   "wind_intensity": 0.6576544346975057,
+   "biomes": {
+    "Meadows": "ThunderStorm",
+    "Black Forest": "ThunderStorm",
+    "Swamp": "ThunderStorm",
+    "Mountain": "ThunderStorm",
+    "Plains": "ThunderStorm",
+    "Ocean": "ThunderStorm",
+    "Deep North": "ThunderStorm",
+    "Ashlands": "ThunderStorm",
+    "Mistlands": "ThunderStorm"
+   }
+  },
+  {
+   "time": 666,
+   "clock": "Intro",
+   "wind_angle": 97.2543723455758,
+   "wind_intensity": 0.6126542838872772,
+   "biomes": {
+    "Meadows": "ThunderStorm",
+    "Black Forest": "ThunderStorm",
+    "Swamp": "ThunderStorm",
+    "Mountain": "ThunderStorm",
+    "Plains": "ThunderStorm",
+    "Ocean": "ThunderStorm",
+    "Deep North": "ThunderStorm",
+    "Ashlands": "ThunderStorm",
+    "Mistlands": "ThunderStorm"
+   }
+  },
+  {
+   "time": 1332,
+   "clock": "Intro",
+   "wind_angle": 166.8387330805042,
+   "wind_intensity": 0.5219191166012127,
+   "biomes": {
+    "Meadows": "ThunderStorm",
+    "Black Forest": "ThunderStorm",
+    "Swamp": "ThunderStorm",
+    "Mountain": "ThunderStorm",
+    "Plains": "ThunderStorm",
+    "Ocean": "ThunderStorm",
+    "Deep North": "ThunderStorm",
+    "Ashlands": "ThunderStorm",
+    "Mistlands": "ThunderStorm"
+   }
+  },
+  {
+   "time": 1998,
+   "clock": "Intro",
+   "wind_angle": -130.62273667441275,
+   "wind_intensity": 0.9793375882824971,
+   "biomes": {
+    "Meadows": "Clear",
+    "Black Forest": "DeepForest Mist",
+    "Swamp": "SwampRain",
+    "Mountain": "Snow",
+    "Plains": "Heath clear",
+    "Ocean": "Misty",
+    "Deep North": "Twilight Snowstorm",
+    "Ashlands": "Ashrain",
+    "Mistlands": "Darklands dark"
+   }
+  },
+  {
+   "time": 2040,
+   "clock": "Intro",
+   "wind_angle": -75.53423517279657,
+   "wind_intensity": 0.2076106967043855,
+   "biomes": {
+    "Meadows": "Clear",
+    "Black Forest": "DeepForest Mist",
+    "Swamp": "SwampRain",
+    "Mountain": "Snow",
+    "Plains": "Heath clear",
+    "Ocean": "Misty",
+    "Deep North": "Twilight Snowstorm",
+    "Ashlands": "Ashrain",
+    "Mistlands": "Darklands dark"
+   }
+  },
+  {
+   "time": 344395.2,
+   "clock": "07:56",
+   "wind_angle": -140.7639759268528,
+   "wind_intensity": 0.9572130146889745,
+   "biomes": {
+    "Meadows": "Clear",
+    "Black Forest": "DeepForest Mist",
+    "Swamp": "SwampRain",
+    "Mountain": "Snow",
+    "Plains": "Misty",
+    "Ocean": "Clear",
+    "Deep North": "Twilight Clear",
+    "Ashlands": "Ashrain",
+    "Mistlands": "Darklands dark"
+   }
+  },
+  {
+   "time": 1000000.5,
+   "clock": "13:20",
+   "wind_angle": -167.8708201199469,
+   "wind_intensity": 0.40859422107369037,
+   "biomes": {
+    "Meadows": "LightRain",
+    "Black Forest": "ThunderStorm",
+    "Swamp": "SwampRain",
+    "Mountain": "Snow",
+    "Plains": "LightRain",
+    "Ocean": "ThunderStorm",
+    "Deep North": "Twilight Clear",
+    "Ashlands": "Ashrain",
+    "Mistlands": "Darklands dark"
+   }
+  },
+  {
+   "time": 971498.3,
+   "clock": "17:18",
+   "wind_angle": -164.73241563065267,
+   "wind_intensity": 0.9052586111572475,
+   "biomes": {
+    "Meadows": "Clear",
+    "Black Forest": "DeepForest Mist",
+    "Swamp": "SwampRain",
+    "Mountain": "SnowStorm",
+    "Plains": "Heath clear",
+    "Ocean": "LightRain",
+    "Deep North": "Twilight Snowstorm",
+    "Ashlands": "Ashrain",
+    "Mistlands": "Darklands dark"
+   }
+  },
+  {
+   "time": 452547.5,
+   "clock": "09:58",
+   "wind_angle": 132.17316094138033,
+   "wind_intensity": 0.5238454046103511,
+   "biomes": {
+    "Meadows": "Clear",
+    "Black Forest": "DeepForest Mist",
+    "Swamp": "SwampRain",
+    "Mountain": "Snow",
+    "Plains": "Heath clear",
+    "Ocean": "Clear",
+    "Deep North": "Twilight Clear",
+    "Ashlands": "Ashrain",
+    "Mistlands": "Darklands dark"
+   }
+  },
+  {
+   "time": 1952803.4,
+   "clock": "21:22",
+   "wind_angle": 131.647447974339,
+   "wind_intensity": 0.871769890494009,
+   "biomes": {
+    "Meadows": "Clear",
+    "Black Forest": "DeepForest Mist",
+    "Swamp": "SwampRain",
+    "Mountain": "Snow",
+    "Plains": "Heath clear",
+    "Ocean": "Clear",
+    "Deep North": "Twilight Snow",
+    "Ashlands": "Ashrain",
+    "Mistlands": "Darklands dark"
+   }
+  },
+  {
+   "time": 217308.9,
+   "clock": "17:27",
+   "wind_angle": 26.28512272291931,
+   "wind_intensity": 0.26111404614025124,
+   "biomes": {
+    "Meadows": "Clear",
+    "Black Forest": "DeepForest Mist",
+    "Swamp": "SwampRain",
+    "Mountain": "Snow",
+    "Plains": "Heath clear",
+    "Ocean": "Clear",
+    "Deep North": "Twilight Snow",
+    "Ashlands": "Ashrain",
+    "Mistlands": "Darklands dark"
+   }
+  },
+  {
+   "time": 1607646,
+   "clock": "03:16",
+   "wind_angle": -123.91676360832452,
+   "wind_intensity": 0.5747268798323876,
+   "biomes": {
+    "Meadows": "Clear",
+    "Black Forest": "DeepForest Mist",
+    "Swamp": "SwampRain",
+    "Mountain": "Snow",
+    "Plains": "Heath clear",
+    "Ocean": "Clear",
+    "Deep North": "Twilight Clear",
+    "Ashlands": "Ashrain",
+    "Mistlands": "Darklands dark"
+   }
+  },
+  {
+   "time": 1097066.8,
+   "clock": "11:33",
+   "wind_angle": 119.31340645982732,
+   "wind_intensity": 0.23027738944342765,
+   "biomes": {
+    "Meadows": "Clear",
+    "Black Forest": "DeepForest Mist",
+    "Swamp": "SwampRain",
+    "Mountain": "Snow",
+    "Plains": "Heath clear",
+    "Ocean": "Clear",
+    "Deep North": "Twilight Snow",
+    "Ashlands": "Ashrain",
+    "Mistlands": "Darklands dark"
+   }
+  },
+  {
+   "time": 173996.8,
+   "clock": "15:57",
+   "wind_angle": -12.93016246821037,
+   "wind_intensity": 0.8490993085518944,
+   "biomes": {
+    "Meadows": "Clear",
+    "Black Forest": "DeepForest Mist",
+    "Swamp": "SwampRain",
+    "Mountain": "Snow",
+    "Plains": "Heath clear",
+    "Ocean": "Misty",
+    "Deep North": "Twilight Snowstorm",
+    "Ashlands": "Ashrain",
+    "Mistlands": "Darklands dark"
+   }
+  },
+  {
+   "time": 1522307.2,
+   "clock": "17:25",
+   "wind_angle": -133.3361613222715,
+   "wind_intensity": 0.19121369734143695,
+   "biomes": {
+    "Meadows": "Clear",
+    "Black Forest": "DeepForest Mist",
+    "Swamp": "SwampRain",
+    "Mountain": "Snow",
+    "Plains": "Misty",
+    "Ocean": "Clear",
+    "Deep North": "Twilight Clear",
+    "Ashlands": "Ashrain",
+    "Mistlands": "Darklands dark"
+   }
+  },
+  {
+   "time": 112487,
+   "clock": "11:49",
+   "wind_angle": -127.43239933797912,
+   "wind_intensity": 0.22591868058392284,
+   "biomes": {
+    "Meadows": "Clear",
+    "Black Forest": "DeepForest Mist",
+    "Swamp": "SwampRain",
+    "Mountain": "Snow",
+    "Plains": "Misty",
+    "Ocean": "Clear",
+    "Deep North": "Twilight Clear",
+    "Ashlands": "Ashrain",
+    "Mistlands": "Darklands dark"
+   }
+  },
+  {
+   "time": 1300937.1,
+   "clock": "17:49",
+   "wind_angle": -47.857727335732875,
+   "wind_intensity": 0,
+   "biomes": {
+    "Meadows": "Clear",
+    "Black Forest": "DeepForest Mist",
+    "Swamp": "SwampRain",
+    "Mountain": "Snow",
+    "Plains": "Heath clear",
+    "Ocean": "Clear",
+    "Deep North": "Twilight Snow",
+    "Ashlands": "Ashrain",
+    "Mistlands": "Darklands dark"
+   }
+  },
+  {
+   "time": 209566.3,
+   "clock": "10:13",
+   "wind_angle": -115.35598391558884,
+   "wind_intensity": 0.6324016901361528,
+   "biomes": {
+    "Meadows": "Clear",
+    "Black Forest": "DeepForest Mist",
+    "Swamp": "SwampRain",
+    "Mountain": "Snow",
+    "Plains": "Heath clear",
+    "Ocean": "Misty",
+    "Deep North": "Twilight Snowstorm",
+    "Ashlands": "Ashrain",
+    "Mistlands": "Darklands dark"
+   }
+  },
+  {
+   "time": 272139,
+   "clock": "04:31",
+   "wind_angle": -108.89226788396297,
+   "wind_intensity": 0.1633300484625693,
+   "biomes": {
+    "Meadows": "Clear",
+    "Black Forest": "DeepForest Mist",
+    "Swamp": "SwampRain",
+    "Mountain": "Snow",
+    "Plains": "Heath clear",
+    "Ocean": "Clear",
+    "Deep North": "Twilight Snow",
+    "Ashlands": "Ashrain",
+    "Mistlands": "Darklands dark"
+   }
+  },
+  {
+   "time": 1273557.6,
+   "clock": "12:46",
+   "wind_angle": 30.77000150242128,
+   "wind_intensity": 0.748065635837979,
+   "biomes": {
+    "Meadows": "Clear",
+    "Black Forest": "DeepForest Mist",
+    "Swamp": "SwampRain",
+    "Mountain": "Snow",
+    "Plains": "Heath clear",
+    "Ocean": "Clear",
+    "Deep North": "Twilight Snow",
+    "Ashlands": "Ashrain",
+    "Mistlands": "Darklands dark"
+   }
+  },
+  {
+   "time": 2480556.4,
+   "clock": "02:05",
+   "wind_angle": -152.1089368574575,
+   "wind_intensity": 0,
+   "biomes": {
+    "Meadows": "Clear",
+    "Black Forest": "DeepForest Mist",
+    "Swamp": "SwampRain",
+    "Mountain": "Snow",
+    "Plains": "Heath clear",
+    "Ocean": "Clear",
+    "Deep North": "Twilight Clear",
+    "Ashlands": "Ashrain",
+    "Mistlands": "Darklands dark"
+   }
+  },
+  {
+   "time": 371405.9,
+   "clock": "08:04",
+   "wind_angle": 43.89793405400076,
+   "wind_intensity": 0.47328799984203374,
+   "biomes": {
+    "Meadows": "Clear",
+    "Black Forest": "DeepForest Mist",
+    "Swamp": "SwampRain",
+    "Mountain": "Snow",
+    "Plains": "Heath clear",
+    "Ocean": "Clear",
+    "Deep North": "Twilight Snow",
+    "Ashlands": "Ashrain",
+    "Mistlands": "Darklands dark"
+   }
+  },
+  {
+   "time": 669716.9,
+   "clock": "01:33",
+   "wind_angle": 131.68666723456388,
+   "wind_intensity": 0,
+   "biomes": {
+    "Meadows": "Clear",
+    "Black Forest": "DeepForest Mist",
+    "Swamp": "SwampRain",
+    "Mountain": "Snow",
+    "Plains": "Heath clear",
+    "Ocean": "Clear",
+    "Deep North": "Twilight Snow",
+    "Ashlands": "Ashrain",
+    "Mistlands": "Darklands dark"
+   }
+  },
+  {
+   "time": 1882299.7,
+   "clock": "17:19",
+   "wind_angle": -120.44336194182821,
+   "wind_intensity": 0.1446796955033624,
+   "biomes": {
+    "Meadows": "Clear",
+    "Black Forest": "DeepForest Mist",
+    "Swamp": "SwampRain",
+    "Mountain": "Snow",
+    "Plains": "Heath clear",
+    "Ocean": "Clear",
+    "Deep North": "Twilight Snow",
+    "Ashlands": "Ashrain",
+    "Mistlands": "Darklands dark"
+   }
+  },
+  {
+   "time": 2843126.8,
+   "clock": "12:21",
+   "wind_angle": 29.625266881106768,
+   "wind_intensity": 0.7307367476560725,
+   "biomes": {
+    "Meadows": "Clear",
+    "Black Forest": "DeepForest Mist",
+    "Swamp": "SwampRain",
+    "Mountain": "Snow",
+    "Plains": "Heath clear",
+    "Ocean": "Clear",
+    "Deep North": "Twilight Snow",
+    "Ashlands": "Ashrain",
+    "Mistlands": "Darklands dark"
+   }
+  },
+  {
+   "time": 1731308.8,
+   "clock": "20:07",
+   "wind_angle": -39.30918388052595,
+   "wind_intensity": 0.6128009858192646,
+   "biomes": {
+    "Meadows": "Clear",
+    "Black Forest": "DeepForest Mist",
+    "Swamp": "SwampRain",
+    "Mountain": "Snow",
+    "Plains": "Heath clear",
+    "Ocean": "Clear",
+    "Deep North": "Twilight Clear",
+    "Ashlands": "Ashrain",
+    "Mistlands": "Darklands dark"
+   }
+  },
+  {
+   "time": 1190041.4,
+   "clock": "03:13",
+   "wind_angle": -152.39024693900492,
+   "wind_intensity": 0.3581015320484531,
+   "biomes": {
+    "Meadows": "Clear",
+    "Black Forest": "DeepForest Mist",
+    "Swamp": "SwampRain",
+    "Mountain": "SnowStorm",
+    "Plains": "Heath clear",
+    "Ocean": "Rain",
+    "Deep North": "Twilight Snowstorm",
+    "Ashlands": "Ashrain",
+    "Mistlands": "Darklands dark"
+   }
+  },
+  {
+   "time": 2928765.3,
+   "clock": "02:12",
+   "wind_angle": -174.8857407492785,
+   "wind_intensity": 0.4721000047655776,
+   "biomes": {
+    "Meadows": "Clear",
+    "Black Forest": "DeepForest Mist",
+    "Swamp": "SwampRain",
+    "Mountain": "SnowStorm",
+    "Plains": "Heath clear",
+    "Ocean": "Rain",
+    "Deep North": "Twilight Snowstorm",
+    "Ashlands": "Ashrain",
+    "Mistlands": "Darklands dark"
+   }
+  },
+  {
+   "time": 139748,
+   "clock": "15:18",
+   "wind_angle": -173.10416396081078,
+   "wind_intensity": 1,
+   "biomes": {
+    "Meadows": "Clear",
+    "Black Forest": "DeepForest Mist",
+    "Swamp": "SwampRain",
+    "Mountain": "Snow",
+    "Plains": "Misty",
+    "Ocean": "Clear",
+    "Deep North": "Twilight Clear",
+    "Ashlands": "Ashrain",
+    "Mistlands": "Darklands dark"
+   }
+  },
+  {
+   "time": 2575405.4,
+   "clock": "18:44",
+   "wind_angle": -178.72384245943368,
+   "wind_intensity": 0.8431449833513809,
+   "biomes": {
+    "Meadows": "Clear",
+    "Black Forest": "DeepForest Mist",
+    "Swamp": "SwampRain",
+    "Mountain": "Snow",
+    "Plains": "Heath clear",
+    "Ocean": "Clear",
+    "Deep North": "Twilight Snow",
+    "Ashlands": "Ashrain",
+    "Mistlands": "Darklands dark"
+   }
+  },
+  {
+   "time": 868827.9,
+   "clock": "16:22",
+   "wind_angle": -36.42172686672342,
+   "wind_intensity": 0.3514900358368155,
+   "biomes": {
+    "Meadows": "Clear",
+    "Black Forest": "DeepForest Mist",
+    "Swamp": "SwampRain",
+    "Mountain": "Snow",
+    "Plains": "Heath clear",
+    "Ocean": "Misty",
+    "Deep North": "Twilight Snowstorm",
+    "Ashlands": "Ashrain",
+    "Mistlands": "Darklands dark"
+   }
+  },
+  {
+   "time": 432765.3,
+   "clock": "10:12",
+   "wind_angle": 42.17223832434337,
+   "wind_intensity": 0.7793740483971485,
+   "biomes": {
+    "Meadows": "Clear",
+    "Black Forest": "DeepForest Mist",
+    "Swamp": "SwampRain",
+    "Mountain": "SnowStorm",
+    "Plains": "Heath clear",
+    "Ocean": "Rain",
+    "Deep North": "Twilight Snowstorm",
+    "Ashlands": "Ashrain",
+    "Mistlands": "Darklands dark"
+   }
+  },
+  {
+   "time": 353376.7,
+   "clock": "07:41",
+   "wind_angle": -141.64812321347375,
+   "wind_intensity": 0.36188168842331087,
+   "biomes": {
+    "Meadows": "Clear",
+    "Black Forest": "DeepForest Mist",
+    "Swamp": "SwampRain",
+    "Mountain": "Snow",
+    "Plains": "Heath clear",
+    "Ocean": "Clear",
+    "Deep North": "Twilight Clear",
+    "Ashlands": "Ashrain",
+    "Mistlands": "Darklands dark"
+   }
+  },
+  {
+   "time": 925445.5,
+   "clock": "03:16",
+   "wind_angle": -40.94816379271168,
+   "wind_intensity": 0.3128267230350354,
+   "biomes": {
+    "Meadows": "Clear",
+    "Black Forest": "DeepForest Mist",
+    "Swamp": "SwampRain",
+    "Mountain": "Snow",
+    "Plains": "Heath clear",
+    "Ocean": "Clear",
+    "Deep North": "Twilight Snow",
+    "Ashlands": "Ashrain",
+    "Mistlands": "Darklands dark"
+   }
+  },
+  {
+   "time": 2448379.1,
+   "clock": "05:03",
+   "wind_angle": 174.58630455066145,
+   "wind_intensity": 0.5278216751677267,
+   "biomes": {
+    "Meadows": "Clear",
+    "Black Forest": "DeepForest Mist",
+    "Swamp": "SwampRain",
+    "Mountain": "Snow",
+    "Plains": "LightRain",
+    "Ocean": "Clear",
+    "Deep North": "Twilight Clear",
+    "Ashlands": "Ashrain",
+    "Mistlands": "Darklands dark"
+   }
+  },
+  {
+   "time": 542179.1,
+   "clock": "05:03",
+   "wind_angle": -165.24685795541083,
+   "wind_intensity": 0.8170467767060144,
+   "biomes": {
+    "Meadows": "Clear",
+    "Black Forest": "DeepForest Mist",
+    "Swamp": "SwampRain",
+    "Mountain": "Snow",
+    "Plains": "Heath clear",
+    "Ocean": "Clear",
+    "Deep North": "Twilight Clear",
+    "Ashlands": "Ashrain",
+    "Mistlands": "Darklands dark"
+   }
+  },
+  {
+   "time": 1744800.5,
+   "clock": "08:00",
+   "wind_angle": -25.12763134788895,
+   "wind_intensity": 0.8095526400131763,
+   "biomes": {
+    "Meadows": "Clear",
+    "Black Forest": "DeepForest Mist",
+    "Swamp": "SwampRain",
+    "Mountain": "Snow",
+    "Plains": "Heath clear",
+    "Ocean": "Clear",
+    "Deep North": "Twilight Snow",
+    "Ashlands": "Ashrain",
+    "Mistlands": "Darklands dark"
+   }
+  },
+  {
+   "time": 1916740.4,
+   "clock": "20:32",
+   "wind_angle": 121.12727712866086,
+   "wind_intensity": 0.21504874542647714,
+   "biomes": {
+    "Meadows": "Clear",
+    "Black Forest": "DeepForest Mist",
+    "Swamp": "SwampRain",
+    "Mountain": "SnowStorm",
+    "Plains": "Heath clear",
+    "Ocean": "Rain",
+    "Deep North": "Twilight Snowstorm",
+    "Ashlands": "Ashrain",
+    "Mistlands": "Darklands dark"
+   }
+  },
+  {
+   "time": 1117192.6,
+   "clock": "15:54",
+   "wind_angle": -7.625595249148432,
+   "wind_intensity": 1,
+   "biomes": {
+    "Meadows": "ThunderStorm",
+    "Black Forest": "ThunderStorm",
+    "Swamp": "SwampRain",
+    "Mountain": "Snow",
+    "Plains": "LightRain",
+    "Ocean": "ThunderStorm",
+    "Deep North": "Twilight Clear",
+    "Ashlands": "Ashrain",
+    "Mistlands": "Darklands dark"
+   }
+  },
+  {
+   "time": 1643233.4,
+   "clock": "21:46",
+   "wind_angle": -168.16808934513668,
+   "wind_intensity": 0.6376284959435297,
+   "biomes": {
+    "Meadows": "Clear",
+    "Black Forest": "DeepForest Mist",
+    "Swamp": "SwampRain",
+    "Mountain": "Snow",
+    "Plains": "Heath clear",
+    "Ocean": "Clear",
+    "Deep North": "Twilight Snow",
+    "Ashlands": "Ashrain",
+    "Mistlands": "Darklands dark"
+   }
+  },
+  {
+   "time": 188366.9,
+   "clock": "15:33",
+   "wind_angle": -22.868117015545238,
+   "wind_intensity": 0.6400276126986201,
+   "biomes": {
+    "Meadows": "Clear",
+    "Black Forest": "DeepForest Mist",
+    "Swamp": "SwampRain",
+    "Mountain": "Snow",
+    "Plains": "Heath clear",
+    "Ocean": "Clear",
+    "Deep North": "Twilight Snow",
+    "Ashlands": "Ashrain",
+    "Mistlands": "Darklands dark"
+   }
+  },
+  {
+   "time": 178803.5,
+   "clock": "08:02",
+   "wind_angle": -63.829729488079806,
+   "wind_intensity": 0.3815784158229545,
+   "biomes": {
+    "Meadows": "Clear",
+    "Black Forest": "DeepForest Mist",
+    "Swamp": "SwampRain",
+    "Mountain": "SnowStorm",
+    "Plains": "Heath clear",
+    "Ocean": "Misty",
+    "Deep North": "Twilight Snowstorm",
+    "Ashlands": "Ashrain",
+    "Mistlands": "Darklands dark"
+   }
+  },
+  {
+   "time": 617876.1,
+   "clock": "06:20",
+   "wind_angle": 54.10901258096777,
+   "wind_intensity": 0.8725465539167744,
+   "biomes": {
+    "Meadows": "ThunderStorm",
+    "Black Forest": "ThunderStorm",
+    "Swamp": "SwampRain",
+    "Mountain": "Snow",
+    "Plains": "LightRain",
+    "Ocean": "ThunderStorm",
+    "Deep North": "Twilight Clear",
+    "Ashlands": "Ashrain",
+    "Mistlands": "Darklands dark"
+   }
+  },
+  {
+   "time": 2041199.9,
+   "clock": "23:59",
+   "wind_angle": -156.23283321881496,
+   "wind_intensity": 0.788454473304086,
+   "biomes": {
+    "Meadows": "Clear",
+    "Black Forest": "DeepForest Mist",
+    "Swamp": "SwampRain",
+    "Mountain": "Snow",
+    "Plains": "Heath clear",
+    "Ocean": "Clear",
+    "Deep North": "Twilight Clear",
+    "Ashlands": "Ashrain",
+    "Mistlands": "Darklands dark"
+   }
+  },
+  {
+   "time": 1282776.9,
+   "clock": "15:41",
+   "wind_angle": -158.859890652555,
+   "wind_intensity": 0.8886710706460689,
+   "biomes": {
+    "Meadows": "Clear",
+    "Black Forest": "DeepForest Mist",
+    "Swamp": "SwampRain",
+    "Mountain": "Snow",
+    "Plains": "Heath clear",
+    "Ocean": "Clear",
+    "Deep North": "Twilight Snow",
+    "Ashlands": "Ashrain",
+    "Mistlands": "Darklands dark"
+   }
+  },
+  {
+   "time": 942441.5,
+   "clock": "13:53",
+   "wind_angle": -123.45763916230237,
+   "wind_intensity": 0.4963678123741102,
+   "biomes": {
+    "Meadows": "Clear",
+    "Black Forest": "DeepForest Mist",
+    "Swamp": "SwampRain",
+    "Mountain": "SnowStorm",
+    "Plains": "Heath clear",
+    "Ocean": "Rain",
+    "Deep North": "Twilight Snowstorm",
+    "Ashlands": "Ashrain",
+    "Mistlands": "Darklands dark"
+   }
+  },
+  {
+   "time": 1756685.6,
+   "clock": "22:28",
+   "wind_angle": -67.3087798867628,
+   "wind_intensity": 0.18838810935287925,
+   "biomes": {
+    "Meadows": "Misty",
+    "Black Forest": "Misty",
+    "Swamp": "SwampRain",
+    "Mountain": "Snow",
+    "Plains": "LightRain",
+    "Ocean": "Clear",
+    "Deep North": "Twilight Clear",
+    "Ashlands": "Ashrain",
+    "Mistlands": "Darklands dark"
+   }
+  },
+  {
+   "time": 1359553.1,
+   "clock": "07:22",
+   "wind_angle": 151.04927662551617,
+   "wind_intensity": 0,
+   "biomes": {
+    "Meadows": "Misty",
+    "Black Forest": "Rain",
+    "Swamp": "SwampRain",
+    "Mountain": "Snow",
+    "Plains": "LightRain",
+    "Ocean": "Clear",
+    "Deep North": "Twilight Clear",
+    "Ashlands": "Ashrain",
+    "Mistlands": "Darklands dark"
+   }
+  },
+  {
+   "time": 899301,
+   "clock": "14:40",
+   "wind_angle": 86.18305037873404,
+   "wind_intensity": 0.022180944788195434,
+   "biomes": {
+    "Meadows": "Clear",
+    "Black Forest": "DeepForest Mist",
+    "Swamp": "SwampRain",
+    "Mountain": "SnowStorm",
+    "Plains": "Heath clear",
+    "Ocean": "LightRain",
+    "Deep North": "Twilight Snowstorm",
+    "Ashlands": "Ashrain",
+    "Mistlands": "Darklands dark"
+   }
+  },
+  {
+   "time": 2383138.4,
+   "clock": "23:10",
+   "wind_angle": 8.503080096212898,
+   "wind_intensity": 0.9735497984595247,
+   "biomes": {
+    "Meadows": "Clear",
+    "Black Forest": "DeepForest Mist",
+    "Swamp": "SwampRain",
+    "Mountain": "Snow",
+    "Plains": "Heath clear",
+    "Ocean": "Clear",
+    "Deep North": "Twilight Snow",
+    "Ashlands": "Ashrain",
+    "Mistlands": "Darklands dark"
+   }
+  },
+  {
+   "time": 2096983.3,
+   "clock": "23:46",
+   "wind_angle": 18.085593669229468,
+   "wind_intensity": 0.7052060964383897,
+   "biomes": {
+    "Meadows": "Clear",
+    "Black Forest": "DeepForest Mist",
+    "Swamp": "SwampRain",
+    "Mountain": "Snow",
+    "Plains": "Heath clear",
+    "Ocean": "Clear",
+    "Deep North": "Twilight Snow",
+    "Ashlands": "Ashrain",
+    "Mistlands": "Darklands dark"
+   }
+  },
+  {
+   "time": 732289.5,
+   "clock": "19:51",
+   "wind_angle": -97.64458530993306,
+   "wind_intensity": 0.9288350793920307,
+   "biomes": {
+    "Meadows": "Clear",
+    "Black Forest": "DeepForest Mist",
+    "Swamp": "SwampRain",
+    "Mountain": "Snow",
+    "Plains": "Heath clear",
+    "Ocean": "Misty",
+    "Deep North": "Twilight Snowstorm",
+    "Ashlands": "Ashrain",
+    "Mistlands": "Darklands dark"
+   }
+  },
+  {
+   "time": 1723271.1,
+   "clock": "08:56",
+   "wind_angle": 163.20767108425676,
+   "wind_intensity": 0.5187391491970604,
+   "biomes": {
+    "Meadows": "Clear",
+    "Black Forest": "DeepForest Mist",
+    "Swamp": "SwampRain",
+    "Mountain": "Snow",
+    "Plains": "Heath clear",
+    "Ocean": "Clear",
+    "Deep North": "Twilight Clear",
+    "Ashlands": "Ashrain",
+    "Mistlands": "Darklands dark"
+   }
+  },
+  {
+   "time": 1575589.5,
+   "clock": "07:51",
+   "wind_angle": -85.83119266802237,
+   "wind_intensity": 0.8797604742732971,
+   "biomes": {
+    "Meadows": "Clear",
+    "Black Forest": "DeepForest Mist",
+    "Swamp": "SwampRain",
+    "Mountain": "Snow",
+    "Plains": "Misty",
+    "Ocean": "Clear",
+    "Deep North": "Twilight Clear",
+    "Ashlands": "Ashrain",
+    "Mistlands": "Darklands dark"
+   }
+  },
+  {
+   "time": 2625412.5,
+   "clock": "13:30",
+   "wind_angle": -174.2137991949482,
+   "wind_intensity": 0.488981366373245,
+   "biomes": {
+    "Meadows": "Clear",
+    "Black Forest": "DeepForest Mist",
+    "Swamp": "SwampRain",
+    "Mountain": "Snow",
+    "Plains": "Heath clear",
+    "Ocean": "Misty",
+    "Deep North": "Twilight Snowstorm",
+    "Ashlands": "Ashrain",
+    "Mistlands": "Darklands dark"
+   }
+  },
+  {
+   "time": 2188335.9,
+   "clock": "17:48",
+   "wind_angle": 41.0769636372749,
+   "wind_intensity": 0.6379295292020378,
+   "biomes": {
+    "Meadows": "Clear",
+    "Black Forest": "DeepForest Mist",
+    "Swamp": "SwampRain",
+    "Mountain": "Snow",
+    "Plains": "Misty",
+    "Ocean": "Clear",
+    "Deep North": "Twilight Clear",
+    "Ashlands": "Ashrain",
+    "Mistlands": "Darklands dark"
+   }
+  },
+  {
+   "time": 863813.3,
+   "clock": "21:30",
+   "wind_angle": -25.15973202538669,
+   "wind_intensity": 0.005125671728194142,
+   "biomes": {
+    "Meadows": "Clear",
+    "Black Forest": "DeepForest Mist",
+    "Swamp": "SwampRain",
+    "Mountain": "SnowStorm",
+    "Plains": "Heath clear",
+    "Ocean": "LightRain",
+    "Deep North": "Twilight Snowstorm",
+    "Ashlands": "Ashrain",
+    "Mistlands": "Darklands dark"
+   }
+  },
+  {
+   "time": 2940524.5,
+   "clock": "14:59",
+   "wind_angle": 133.74849748186494,
+   "wind_intensity": 0.47662094256703774,
+   "biomes": {
+    "Meadows": "Clear",
+    "Black Forest": "DeepForest Mist",
+    "Swamp": "SwampRain",
+    "Mountain": "Snow",
+    "Plains": "Heath clear",
+    "Ocean": "Clear",
+    "Deep North": "Twilight Snow",
+    "Ashlands": "Ashrain",
+    "Mistlands": "Darklands dark"
+   }
+  },
+  {
+   "time": 354197.3,
+   "clock": "18:37",
+   "wind_angle": -73.93243067756583,
+   "wind_intensity": 0.16533137871949727,
+   "biomes": {
+    "Meadows": "Clear",
+    "Black Forest": "DeepForest Mist",
+    "Swamp": "SwampRain",
+    "Mountain": "Snow",
+    "Plains": "Heath clear",
+    "Ocean": "Clear",
+    "Deep North": "Twilight Snow",
+    "Ashlands": "Ashrain",
+    "Mistlands": "Darklands dark"
+   }
+  },
+  {
+   "time": 1254368.5,
+   "clock": "20:54",
+   "wind_angle": 56.001214481890486,
+   "wind_intensity": 0.8423515859245909,
+   "biomes": {
+    "Meadows": "Clear",
+    "Black Forest": "DeepForest Mist",
+    "Swamp": "SwampRain",
+    "Mountain": "Snow",
+    "Plains": "Heath clear",
+    "Ocean": "Clear",
+    "Deep North": "Twilight Snow",
+    "Ashlands": "Ashrain",
+    "Mistlands": "Darklands dark"
+   }
+  },
+  {
+   "time": 2271422.8,
+   "clock": "21:38",
+   "wind_angle": -120.16251320023147,
+   "wind_intensity": 0.6655039938872225,
+   "biomes": {
+    "Meadows": "Clear",
+    "Black Forest": "DeepForest Mist",
+    "Swamp": "SwampRain",
+    "Mountain": "Snow",
+    "Plains": "Heath clear",
+    "Ocean": "Clear",
+    "Deep North": "Twilight Snow",
+    "Ashlands": "Ashrain",
+    "Mistlands": "Darklands dark"
+   }
+  },
+  {
+   "time": 455953.6,
+   "clock": "07:22",
+   "wind_angle": -85.41012876793047,
+   "wind_intensity": 0.8269395533167849,
+   "biomes": {
+    "Meadows": "Clear",
+    "Black Forest": "DeepForest Mist",
+    "Swamp": "SwampRain",
+    "Mountain": "Snow",
+    "Plains": "Heath clear",
+    "Ocean": "Clear",
+    "Deep North": "Twilight Clear",
+    "Ashlands": "Ashrain",
+    "Mistlands": "Darklands dark"
+   }
+  },
+  {
+   "time": 1466889.3,
+   "clock": "22:31",
+   "wind_angle": -27.29882053735173,
+   "wind_intensity": 0.6804438981036526,
+   "biomes": {
+    "Meadows": "Clear",
+    "Black Forest": "DeepForest Mist",
+    "Swamp": "SwampRain",
+    "Mountain": "Snow",
+    "Plains": "Heath clear",
+    "Ocean": "Clear",
+    "Deep North": "Twilight Snow",
+    "Ashlands": "Ashrain",
+    "Mistlands": "Darklands dark"
+   }
+  },
+  {
+   "time": 117621.8,
+   "clock": "08:17",
+   "wind_angle": 150.82294646436884,
+   "wind_intensity": 0.8938414159536691,
+   "biomes": {
+    "Meadows": "Clear",
+    "Black Forest": "DeepForest Mist",
+    "Swamp": "SwampRain",
+    "Mountain": "Snow",
+    "Plains": "Heath clear",
+    "Ocean": "Clear",
+    "Deep North": "Twilight Snow",
+    "Ashlands": "Ashrain",
+    "Mistlands": "Darklands dark"
+   }
+  },
+  {
+   "time": 2004647.6,
+   "clock": "16:38",
+   "wind_angle": -103.7491696476352,
+   "wind_intensity": 0.30366016941637736,
+   "biomes": {
+    "Meadows": "Clear",
+    "Black Forest": "DeepForest Mist",
+    "Swamp": "SwampRain",
+    "Mountain": "Snow",
+    "Plains": "Heath clear",
+    "Ocean": "Clear",
+    "Deep North": "Twilight Snow",
+    "Ashlands": "Ashrain",
+    "Mistlands": "Darklands dark"
+   }
+  },
+  {
+   "time": 2293712.6,
+   "clock": "06:50",
+   "wind_angle": 79.12909279557147,
+   "wind_intensity": 0.028569951761995907,
+   "biomes": {
+    "Meadows": "Clear",
+    "Black Forest": "DeepForest Mist",
+    "Swamp": "SwampRain",
+    "Mountain": "Snow",
+    "Plains": "Heath clear",
+    "Ocean": "Clear",
+    "Deep North": "Twilight Clear",
+    "Ashlands": "Ashrain",
+    "Mistlands": "Darklands dark"
+   }
+  },
+  {
+   "time": 1719077.8,
+   "clock": "01:02",
+   "wind_angle": 95.2526826726396,
+   "wind_intensity": 0.9547480795048756,
+   "biomes": {
+    "Meadows": "Clear",
+    "Black Forest": "DeepForest Mist",
+    "Swamp": "SwampRain",
+    "Mountain": "SnowStorm",
+    "Plains": "Heath clear",
+    "Ocean": "Misty",
+    "Deep North": "Twilight Snowstorm",
+    "Ashlands": "Ashrain",
+    "Mistlands": "Darklands dark"
+   }
+  }
+ ]
+}
