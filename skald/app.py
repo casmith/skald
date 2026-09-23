@@ -1,0 +1,1474 @@
+#!/usr/bin/env python3
+"""
+skald: who is on the Valheim servers right now, how long each player has
+played and how often they have died, how far the world has been explored,
+when the bosses fell, and what the weather is doing.
+
+Not the in-game day: the "World time" in Valheim's autosave line looked like
+the world clock but is seconds since the server process started -- it
+restarts from zero with the server. The real clock is only in the world save.
+
+Valheim's Steam query (the servers' status.json) reports a player *count* but
+blanks every name, so names have to come from the server log. Each game
+container runs a log-filter hook (see compose.example.yaml)
+that appends the few lines that matter to /events/<World>.log:
+
+  Got connection SteamID <id>                  a client connected
+  Got character ZDOID from <name> : <a>:<b>    ...and picked this character;
+                                               0:0 means that character died
+  Closing socket <id>                          a client left
+  Game - OnApplicationQuit                     the server shut down
+  Placed location <Name> in zone <x>,<y>       a landmark generated as a
+                                               player first reached its zone
+
+History is rebuilt from those files whenever one changes -- they are small
+and append-only, so there is no database to migrate or get out of step. The one
+thing the log cannot say is "the server crashed with people on it", so a
+poller watches each status.json and, when it reports nobody online while a
+session is still open, appends a close marker of its own to
+/data/<World>.reconcile.log.
+
+  /               HTML page (online now, playtime, deaths, last 30 days)
+  /api/online     who is on each server
+  /api/playtime   per-player hours and deaths for 24h / 7d / 30d / all time
+  /api/sessions   recent sessions (?limit=N, default 100)
+  /api/deaths     recent deaths (?limit=N, default 100)
+  /api/daily      hours played, deaths and new landmarks per day (?days=N)
+  /api/milestones bosses and other firsts, with the window each happened in
+  /api/weather    each world's in-game clock and per-biome weather
+  /healthz        liveness probe
+
+Python stdlib only.
+"""
+import glob
+import gzip
+import html
+import json
+import os
+import re
+import struct
+import threading
+import time
+import urllib.parse
+import urllib.request
+import zipfile
+
+from skald import weather
+from datetime import datetime, timedelta, UTC
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+try:
+    from zoneinfo import ZoneInfo
+    LOCAL_TZ = ZoneInfo(os.environ.get("TRACKER_TZ", "America/Chicago"))
+except Exception:  # no tzdata in the image: days are UTC days instead
+    LOCAL_TZ = UTC
+
+PORT = int(os.environ.get("TRACKER_PORT", "8080"))
+EVENTS_DIR = os.environ.get("EVENTS_DIR", "/events")
+DATA_DIR = os.environ.get("DATA_DIR", "/data")
+POLL_SECONDS = int(os.environ.get("POLL_SECONDS", "60"))
+# A drop-and-rejoin inside this many seconds is one session, not two.
+MERGE_GAP = int(os.environ.get("MERGE_GAP_SECONDS", "120"))
+# A connection that never picks a character within this long is abandoned
+# (wrong password, version mismatch) and must not claim a later player's name.
+PENDING_TTL = 300
+CHART_DAYS = 30
+# "World=http://host/status.json,..." -- World must match the game container's
+# WORLD_NAME, which is what the hook names its events file after.
+# The tab the page opens on. Defaults to the first world in TRACKER_SERVERS.
+DEFAULT_WORLD = os.environ.get("TRACKER_DEFAULT_WORLD", "")
+SERVERS = dict(
+    item.split("=", 1)
+    for item in os.environ.get("TRACKER_SERVERS", "").split(",")
+    if "=" in item
+)
+
+WINDOWS = [("24h", 86400), ("7d", 7 * 86400), ("30d", 30 * 86400)]
+
+# Milestones (boss kills and other firsts) are global keys the world sets and
+# saves. Three sources date them, best first:
+#   1. the server log -- "Setting global key <key>" from the hook: exact;
+#   2. the live autosaves, <SAVES_ROOT>/<World>/worlds_local/<World>/, read
+#      every minute: a key new in a save is pinned between that save and the
+#      one before it -- 30 minutes;
+#   3. the hourly backups on the NAS, <BACKUPS_ROOT>/<world, lowercased>/
+#      backups/worlds-YYYYMMDD-HHMMSS.zip -- ~90 minutes, but they reach back
+#      14 days, so they date what happened before 1 and 2 were watching.
+# What 2 and 3 find is kept in MILESTONE_FILE: saves roll over and backups
+# are pruned, and a milestone must outlive the files that dated it.
+BACKUPS_ROOT = os.environ.get("BACKUPS_ROOT", "/nas")
+SAVES_ROOT = os.environ.get("SAVES_ROOT", "/saves")
+MILESTONE_FILE = os.path.join(DATA_DIR, "milestones.json")
+SAVE_SCAN_SECONDS = 60
+BACKUP_SCAN_EVERY = 10  # save scans, i.e. every 10 minutes
+# A boss summoned this long before its kill counts as that fight's start.
+FIGHT_MAX_SECONDS = 3600
+# Log timestamps are to the second and file times can land a moment either
+# side of them, so a log time this close to a window's edge still counts.
+EDGE_TOLERANCE = 120
+# A backup holds the world as of its last autosave, up to 30 minutes older
+# than the backup, so a flag can have been set that long before the last
+# backup that lacks it.
+AUTOSAVE_SLACK = 1800
+BACKUP_NAME_RE = re.compile(r"worlds-(\d{8})-(\d{6})\.zip$")
+# A world's global keys are length-prefixed strings, saved lowercased; the
+# milestone ones all start like this. The key is read as exactly as many
+# bytes as its length byte says -- a greedy match could run on into whatever
+# follows -- and must then be a whole key, which rules out stray substrings.
+GLOBAL_KEY_RE = re.compile(rb"[\x01-\x7f](?=defeated|killed|bosshildir)")
+MILESTONE_KEY_RE = re.compile(r"^(?:defeated|killed|bosshildir)[a-z0-9_]*$")
+MILESTONES = {
+    # key: (label, kind). Unknown keys still show, with a generated label.
+    "defeated_eikthyr": ("Eikthyr defeated", "boss"),
+    "defeated_gdking": ("The Elder defeated", "boss"),
+    "defeated_bonemass": ("Bonemass defeated", "boss"),
+    "defeated_dragon": ("Moder defeated", "boss"),
+    "defeated_goblinking": ("Yagluth defeated", "boss"),
+    "defeated_queen": ("The Queen defeated", "boss"),
+    "defeated_fader": ("Fader defeated", "boss"),
+    # The mini-bosses of Hildir's quests, in quest order. Lord Reto's key is
+    # not known here; it will show with a generated label.
+    "bosshildir1": ("Brenna defeated (Hildir's first chest)", "mini-boss"),
+    "bosshildir2": ("Geirrhafa defeated (Hildir's second chest)", "mini-boss"),
+    "bosshildir3": ("Zil & Thungr defeated (Hildir's third chest)", "mini-boss"),
+    # Rare Swamp creature, not a mini-boss. The only known effect of its key
+    # is that the Bog Witch starts selling the Crown of Roots.
+    "defeated_writhan": ("First Writhan killed", "rare"),
+    "defeated_serpent": ("First sea serpent killed", "first"),
+    "killedtroll": ("First troll killed", "first"),
+    "killedbat": ("First bat killed", "first"),
+    "killed_surtling": ("First surtling killed", "first"),
+}
+# The main bosses in progression order: shown as achievement badges, locked
+# and nameless until beaten. Everything else in MILESTONES is listed plainly.
+BOSSES = [
+    ("defeated_eikthyr", "Eikthyr"), ("defeated_gdking", "The Elder"),
+    ("defeated_bonemass", "Bonemass"), ("defeated_dragon", "Moder"),
+    ("defeated_goblinking", "Yagluth"), ("defeated_queen", "The Queen"),
+    ("defeated_fader", "Fader"),
+]
+NUMERALS = ["I", "II", "III", "IV", "V", "VI", "VII"]
+
+# Valheim stamps its own lines, in the container's timezone -- Etc/UTC unless
+# TZ is set on the game container, which none of ours do.
+TS_RE = re.compile(r"(\d\d)/(\d\d)/(\d{4}) (\d\d):(\d\d):(\d\d): ")
+EVENT_RES = [
+    # (kind, regex, sort priority within the same second). A close sorts
+    # before a connect so a same-second reconnect ends the old session first.
+    ("close", re.compile(r"Closing socket (\d+)"), 0),
+    ("connect", re.compile(r"Got connection SteamID (\d+)"), 1),
+    ("character", re.compile(r"Got character ZDOID from (.+) : (-?\d+):(-?\d+)"), 2),
+    ("quit", re.compile(r"OnApplicationQuit"), 3),
+    ("gone", re.compile(r"\[tracker\] no players online"), 3),
+    ("location", re.compile(r"Placed location (\S+) in zone (-?\d+),(-?\d+)"), 3),
+    ("globalkey", re.compile(r"Setting global key (\S+)"), 3),
+    ("bossspawn", re.compile(r"Spawning boss at"), 3),
+]
+
+LOCK = threading.Lock()
+# World -> latest poll result: {"up", "count", "status_ts", "error"}.
+STATUS = {}
+# World -> status_ts of the last poll that saw anyone online.
+LAST_NONZERO = {}
+
+
+def parse_line(line):
+    m = TS_RE.search(line)
+    if not m:
+        return None
+    mo, d, y, hh, mi, ss = map(int, m.groups())
+    ts = datetime(y, mo, d, hh, mi, ss, tzinfo=UTC).timestamp()
+    body = line[m.start():].strip()
+    for kind, rx, prio in EVENT_RES:
+        em = rx.search(body)
+        if em:
+            return ts, prio, kind, em.groups(), body
+    return None
+
+
+def event_paths():
+    return sorted(glob.glob(os.path.join(EVENTS_DIR, "*.log"))
+                  + glob.glob(os.path.join(DATA_DIR, "*.log")))
+
+
+def load_events():
+    """World -> sorted events, from both the hook files and our own markers.
+
+    Deduplicated on the line itself (from its timestamp on), so a backfill
+    from `docker logs` can overlap the live file without double counting.
+    """
+    paths = event_paths()
+    seen, events = set(), {}
+    for path in paths:
+        world = os.path.basename(path).split(".", 1)[0]
+        try:
+            with open(path, errors="replace") as f:
+                lines = f.read().splitlines()
+        except OSError:
+            continue
+        for line in lines:
+            ev = parse_line(line)
+            if not ev or (world, ev[4]) in seen:
+                continue
+            seen.add((world, ev[4]))
+            events.setdefault(world, []).append(ev[:4])
+    for evs in events.values():
+        evs.sort(key=lambda e: (e[0], e[1]))
+    return events
+
+
+def replay_world(world, evs, out):
+    """Replay one world's events into `out`, which holds the shared lists.
+
+    Split out of build_history so the helpers below close over this world's
+    state alone: when they lived in the loop they captured whichever world
+    came last, which happened to be harmless and would not have stayed that
+    way.
+    """
+    pending = {}  # steamid -> connect time, not yet bound to a character
+    online = {}   # player -> open session
+    last = {}     # player -> most recent closed session
+    zones = set()
+
+    def close(name, ts, seen=True):
+        """End a session. `seen` is False when the log never said so -- we
+        inferred it -- and such a session must not be merged with a later
+        one, or a crash and a rejoin hours later become a single session
+        with the time between counted as play."""
+        s = online.pop(name)
+        s["end"] = max(ts, s["start"])
+        s["seen_leave"] = seen
+        last[name] = s
+
+    for ts, _, kind, args in evs:
+        if kind == "connect":
+            sid = args[0]
+            for name, s in list(online.items()):
+                if s["steamid"] == sid:  # we missed its Closing socket
+                    close(name, ts, seen=False)
+            pending[sid] = ts
+        elif kind == "character":
+            name, a, b = args
+            if (a, b) == ("0", "0"):
+                out["deaths"].append({"world": world, "player": name, "ts": ts})
+                continue
+            if name in online:  # respawn after a death: same session
+                continue
+            for sid in [k for k, v in pending.items() if ts - v > PENDING_TTL]:
+                del pending[sid]
+            sid = min(pending, key=pending.get) if pending else None
+            start = pending.pop(sid) if sid else ts
+            prev = last.get(name)
+            if prev and prev.get("seen_leave", True) and start - prev["end"] <= MERGE_GAP:
+                prev["end"], prev["steamid"] = None, sid
+                online[name] = prev
+            else:
+                s = {"world": world, "player": name, "steamid": sid,
+                     "start": start, "end": None}
+                out["sessions"].append(s)
+                online[name] = s
+        elif kind == "close":
+            pending.pop(args[0], None)
+            for name, s in list(online.items()):
+                if s["steamid"] == args[0]:
+                    close(name, ts)
+        elif kind == "globalkey":
+            key = args[0].lower()
+            if MILESTONE_KEY_RE.match(key):
+                out["keys"].append({"world": world, "key": key, "ts": ts})
+        elif kind == "bossspawn":
+            out["spawns"].append({"world": world, "ts": ts})
+        elif kind == "location":
+            # Several locations can land in one zone; count the zone once.
+            zone = f"{args[1]},{args[2]}"
+            if zone not in zones:
+                zones.add(zone)
+                out["explored"].append({"world": world, "ts": ts, "zone": zone})
+        else:  # quit / gone: everyone on this world is off
+            for name in list(online):
+                close(name, ts, seen=kind == "quit")
+            pending.clear()
+
+
+def build_history():
+    """Replay each world's events. Returns a dict of:
+
+      sessions  [{world, player, steamid, start, end}], end None while online
+      deaths    [{world, player, ts}]
+      explored  [{world, ts, zone}], one per zone first generated with a
+                landmark in it -- zones without one are never logged
+      keys      [{world, key, ts}], milestone keys the server logged setting
+      spawns    [{world, ts}], boss summons
+    """
+    out = {"sessions": [], "deaths": [], "explored": [], "keys": [], "spawns": []}
+    for world, evs in load_events().items():
+        replay_world(world, evs, out)
+    sessions, deaths, explored = out["sessions"], out["deaths"], out["explored"]
+    keys, spawns = out["keys"], out["spawns"]
+    for s in sessions:
+        s.pop("seen_leave", None)  # internal bookkeeping, not part of the API
+    sessions.sort(key=lambda s: s["start"])
+    deaths.sort(key=lambda d: d["ts"])
+    explored.sort(key=lambda e: e["ts"])
+    keys.sort(key=lambda k: k["ts"])
+    spawns.sort(key=lambda k: k["ts"])
+    return {"sessions": sessions, "deaths": deaths, "explored": explored,
+            "keys": keys, "spawns": spawns}
+
+
+_CACHE = {"sig": None, "history": None}
+_CACHE_LOCK = threading.Lock()
+
+
+def history():
+    """build_history(), redone only when an event file has changed.
+
+    The page is public (valheim.kalde.in), and a full replay grows with the
+    logs -- this keeps a request's cost flat however often it is made.
+    Callers must not mutate the result; it is shared between requests.
+    """
+    sig = []
+    for p in event_paths():
+        try:
+            st = os.stat(p)
+            sig.append((p, st.st_size, st.st_mtime_ns))
+        except OSError:
+            pass
+    sig = tuple(sig)
+    with _CACHE_LOCK:
+        if _CACHE["sig"] != sig:
+            _CACHE["history"], _CACHE["sig"] = build_history(), sig
+        return _CACHE["history"]
+
+
+def poll_once():
+    open_by_world = {}
+    for s in history()["sessions"]:
+        if s["end"] is None:
+            open_by_world.setdefault(s["world"], []).append(s)
+    for world, url in SERVERS.items():
+        st = {"up": False, "count": None, "status_ts": None, "error": None}
+        try:
+            with urllib.request.urlopen(url, timeout=5) as r:
+                data = json.load(r)
+            st["status_ts"] = datetime.fromisoformat(
+                data["last_status_update"]).timestamp()
+            st["error"] = data.get("error")
+            # The updater keeps rewriting status.json while the game is down,
+            # with `error` set -- so a fresh file is not by itself "up".
+            fresh = time.time() - st["status_ts"] < 300
+            st["up"] = fresh and not st["error"]
+            if st["up"]:
+                st["count"] = int(data.get("player_count") or 0)
+        except Exception as e:  # container stopped, or mid-restart
+            st["error"] = str(e)
+        with LOCK:
+            STATUS[world] = st
+        if not st["up"]:
+            continue
+        if st["count"] > 0:
+            LAST_NONZERO[world] = st["status_ts"]
+            continue
+        # Nobody online per the query, but a session is open: its Closing
+        # socket was never logged (crash, kill -9). Close it at the last time
+        # we saw anyone -- but only once the status post-dates the newest
+        # session by a margin, because status.json lags a fresh join.
+        opened = open_by_world.get(world)
+        if not opened or st["status_ts"] - max(s["start"] for s in opened) < 120:
+            continue
+        # Never before the newest open session, or the marker would sort
+        # ahead of it, close nothing, and be re-appended every poll.
+        at = max(LAST_NONZERO.get(world, st["status_ts"]),
+                 max(s["start"] for s in opened))
+        stamp = datetime.fromtimestamp(at, UTC).strftime("%m/%d/%Y %H:%M:%S")
+        with open(os.path.join(DATA_DIR, f"{world}.reconcile.log"), "a") as f:
+            f.write(f"{stamp}: [tracker] no players online\n")
+
+
+def poller():
+    while True:
+        try:
+            poll_once()
+        except Exception as e:
+            print(f"poll failed: {e}", flush=True)
+        time.sleep(POLL_SECONDS)
+
+
+def db2_world(b):
+    """(milestone keys, world clock in seconds) from a world save (.db2)."""
+    # int version, double world time, then the gzip body behind its length.
+    _, world_time, ln = struct.unpack_from("<idi", b, 0)
+    raw = gzip.decompress(b[16:16 + ln])
+    keys = set()
+    for m in GLOBAL_KEY_RE.finditer(raw):
+        key = raw[m.start() + 1:m.start() + 1 + raw[m.start()]].decode("latin-1")
+        if MILESTONE_KEY_RE.match(key):
+            keys.add(key)
+    return keys, world_time
+
+
+def backup_global_keys(path, world):
+    """The milestone keys in one backup's saved world."""
+    with zipfile.ZipFile(path) as z:
+        dbs = [n for n in z.namelist()
+               if f"worlds_local/{world}/" in n and n.endswith(".db2")]
+        if not dbs:
+            return set()
+        return db2_world(z.read(dbs[0]))[0]
+
+
+def save_milestones(state):
+    tmp = MILESTONE_FILE + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(state, f, indent=2)
+    os.replace(tmp, MILESTONE_FILE)
+
+
+def load_milestones():
+    try:
+        with open(MILESTONE_FILE) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def scan_backups():
+    """Record each world's milestones, from backups not yet scanned.
+
+    For each key: `after` is the newest backup that lacked it (None if the
+    oldest backup scanned already had it), `by` the first that had it.
+    """
+    state = load_milestones()
+    for world in SERVERS:
+        st = state.setdefault(world, {"last": "", "last_ts": None, "milestones": {}})
+        pattern = os.path.join(BACKUPS_ROOT, world.lower(), "backups", "worlds-*.zip")
+        for path in sorted(glob.glob(pattern)):
+            name = os.path.basename(path)
+            m = BACKUP_NAME_RE.search(name)
+            if not m or name <= st["last"]:
+                continue
+            try:
+                keys = backup_global_keys(path, world)
+            except Exception as e:
+                # Likely still being written. Stop here and retry next scan
+                # rather than skip it and misdate whatever it holds.
+                print(f"milestones: {name} unreadable, retrying later: {e}", flush=True)
+                break
+            ts = datetime.strptime("".join(m.groups()), "%Y%m%d%H%M%S").replace(
+                tzinfo=UTC).timestamp()
+            for k in keys - set(st["milestones"]):
+                st["milestones"][k] = {"after": st["last_ts"], "by": ts}
+            st["last"], st["last_ts"] = name, ts
+    save_milestones(state)
+
+
+def latest_save(world):
+    """(name, completed_at, path to .db2) of a world's newest finished save.
+
+    A save is _main.<n>.{db2,fwl2,chunks,ok}; the .ok is written once the
+    rest is on disk, so its mtime is when that save completed.
+    """
+    d = os.path.join(SAVES_ROOT, world, "worlds_local", world)
+    best = None
+    for ok in glob.glob(os.path.join(d, "_main.*.ok")):
+        m = re.search(r"_main\.(\d+)\.ok$", ok)
+        if m and (best is None or int(m.group(1)) > best[0]):
+            best = (int(m.group(1)), ok)
+    if not best:
+        return None
+    base = best[1][:-len(".ok")]
+    return os.path.basename(base), os.stat(best[1]).st_mtime, base + ".db2"
+
+
+def scan_saves():
+    """Compare each world's newest autosave with the last one seen.
+
+    A key in this save but not the last was set between the two, and both
+    completion times are known: a 30-minute window, no slack needed. The
+    first save ever seen only sets the baseline.
+    """
+    state = load_milestones()
+    changed = False
+    for world in SERVERS:
+        try:
+            found = latest_save(world)
+            if not found:
+                continue
+            name, done, db2 = found
+            sv = state.setdefault(world, {"last": "", "last_ts": None, "milestones": {}}) \
+                .setdefault("save", {"last": "", "last_ts": None, "keys": None})
+            if name == sv["last"] and done == sv["last_ts"]:
+                continue
+            with open(db2, "rb") as f:
+                keys, world_time = db2_world(f.read())
+        except Exception as e:
+            # Mid-save or rolled over under us: try again next minute.
+            print(f"milestones: {world} save unreadable, retrying: {e}", flush=True)
+            continue
+        live = state[world].setdefault("live", {})
+        if sv["keys"] is None:
+            # First save seen: whatever it already holds happened before
+            # skald was watching. Record it as "by then" with no lower
+            # bound, so a world with history still shows its milestones --
+            # the backups, if there are any, can date them properly later.
+            for k in keys - set(live) - set(state[world].get("milestones", {})):
+                live[k] = {"after": None, "by": done}
+        else:
+            for k in keys - set(sv["keys"]) - set(live):
+                live[k] = {"after": sv["last_ts"], "by": done}
+        sv.update(last=name, last_ts=done, keys=sorted(keys), world_time=world_time)
+        changed = True
+    if changed:
+        save_milestones(state)
+
+
+def milestone_poller():
+    n = 0
+    while True:
+        for scan, due in ((scan_saves, True), (scan_backups, n % BACKUP_SCAN_EVERY == 0)):
+            if due:
+                try:
+                    scan()
+                except Exception as e:
+                    print(f"{scan.__name__} failed: {e}", flush=True)
+        n += 1
+        time.sleep(SAVE_SCAN_SECONDS)
+
+
+def online_seconds(sessions, lo, hi):
+    """Seconds anyone at all was online between lo and hi (no double count)."""
+    spans = sorted((s["start"], s["end"] if s["end"] is not None else hi)
+                   for s in sessions)
+    total, end = 0.0, lo
+    for a, b in spans:
+        a, b = max(a, lo), min(b, hi)
+        if b > max(a, end):
+            total += b - max(a, end)
+            end = max(end, b)
+    return total
+
+
+def world_clock(h, world, now):
+    """The world's own elapsed seconds, as of `now`, or None if unknown.
+
+    The save records it exactly; from there it advances only while someone is
+    online -- the server stops the clock when the world empties (312 hourly
+    backups bear this out: the clock tracked online time, not wall time).
+    """
+    sv = load_milestones().get(world, {}).get("save") or {}
+    if sv.get("world_time") is None or not sv.get("last_ts"):
+        return None
+    sessions = [s for s in h["sessions"] if s["world"] == world]
+    return sv["world_time"] + online_seconds(sessions, sv["last_ts"], now)
+
+
+def unlocked_biomes(h, world):
+    """The biomes this world has reached, by the bosses it has beaten."""
+    st = load_milestones().get(world, {})
+    keys = (set(st.get("save", {}).get("keys") or []) | set(st.get("live", {}))
+            | set(st.get("milestones", {})))
+    keys |= {k["key"] for k in h["keys"] if k["world"] == world}
+    return [b for b, needs in BIOME_UNLOCK.items() if needs is None or needs in keys]
+
+
+def weather_report(h, world, now):
+    t = world_clock(h, world, now)
+    if t is None:
+        return None
+    r = dict(weather.report(t), world=world)
+    allowed = unlocked_biomes(h, world)
+    r["locked"] = len(r["biomes"]) - len(allowed)
+    r["biomes"] = [b for b in r["biomes"] if b["biome"] in allowed]
+    return r
+
+
+# Weather glyphs, cut the way runes are: straight strokes only, no curves.
+# Drawn rather than typed, because a rune *character* shows as an empty box
+# on any device without a runic font.
+GLYPHS = {
+    # sun wheel
+    "Clear": "M8 1.5v3M8 11.5v3M1.5 8h3M11.5 8h3M3.8 3.8l2 2M10.2 10.2l2 2"
+             "M12.2 3.8l-2 2M5.8 10.2l-2 2M8 5.4l2.6 2.6L8 10.6 5.4 8z",
+    # flat drifting strokes
+    "Misty": "M2 5.5h9M5 8.5h9M2 11.5h9",
+    # algiz, the tree, standing in mist
+    "DeepForest Mist": "M8 13.5V6.5M8 6.5 4.6 3.1M8 6.5l3.4-3.4M2 11.5h4M10 11.5h4",
+    "LightRain": "M2.5 4.5h11M5.8 7.2 4.3 11.4M10.2 7.2 8.7 11.4",
+    "Rain": "M2.5 4.5h11M5.2 7.2 3.7 12M8.6 7.2 7.1 12M12 7.2 10.5 12",
+    # sowilo, the lightning stroke
+    "ThunderStorm": "M2.5 4.5h11M9.8 6.4 5.6 10.6h3L5.2 14.8",
+    # hagalaz, the hail rune
+    "Snow": "M5 2.5v11M11 2.5v11M5 6.5l6 3",
+    "SnowStorm": "M5 2.5v11M11 2.5v11M5 6.5l6 3M1.2 4.5h2.4M12.4 11.5h2.4",
+    # the same, over the horizon line the Deep North never rises above
+    "Twilight Clear": "M8 2.5v2.5M2.8 8h2.5M10.7 8h2.5M4.6 4.6l1.7 1.7"
+                      "M11.4 4.6 9.7 6.3M8 6.2l1.8 1.8L8 9.8 6.2 8zM1.5 13.2h13",
+    "Twilight Snow": "M5 2v9M11 2v9M5 5.5l6 3M1.5 13.2h13",
+    "Twilight Snowstorm": "M5 2v9M11 2v9M5 5.5l6 3M1.2 4h2.2M12.6 8.5h2.2M1.5 13.2h13",
+}
+# The single-weather biomes: on the dashboard, and in the forecast's columns.
+GLYPHS["SwampRain"] = "M2.5 3.5h11M5.5 6 4 10M10.5 6 9 10M1.5 13h13"
+GLYPHS["Ashrain"] = "M2.5 3.5h11M5.5 6 4 10.2M10.5 6 9 10.2M5.8 14.5 8 10.5l2.2 4"
+GLYPHS["Darklands dark"] = "M8 14.5V2.5M2 6h12M3 9.5h10M2 13h12"
+GLYPHS["Heath clear"] = GLYPHS["Clear"]
+PHASE_GLYPHS = {
+    "day": GLYPHS["Clear"],
+    # half a sun over the horizon, the chevron saying which way it is going
+    "dawn": "M5.4 11h5.2M4.4 8.4 2.6 6.6M11.6 8.4l1.8-1.8M1.5 13.2h13"
+            "M8 1.8 6.3 3.9M8 1.8l1.7 2.1",
+    "dusk": "M5.4 11h5.2M4.4 8.4 2.6 6.6M11.6 8.4l1.8-1.8M1.5 13.2h13"
+            "M8 4.2 6.3 2.1M8 4.2l1.7-2.1",
+    # a crescent, cut as two strokes rather than filled
+    "night": "M10.6 2.4 5.6 8l5 5.6M10.6 2.4 8.4 8l2.2 5.6",
+}
+# Short column headers; the full name stays in the header's tooltip.
+# Biome marks, cut the same way: peaks for the mountain, kenaz-like flames
+# for the Ashlands, isa (the ice rune) for the Deep North, waves for the sea.
+BIOME_GLYPHS = {
+    "Meadows": "M1.5 12.5h13M4 12.5V7.5M4 9 2 7M4 9l2-2M8 12.5V6M8 8 5.8 5.8M8 8l2.2-2.2"
+               "M12 12.5V7.5M12 9l-2-2M12 9l2-2",
+    "Black Forest": "M1.5 14.5h13M5 14.5V8M5 8 2 4.5M5 8l3-3.5M11 14.5V9M11 9 8.5 6M11 9l3-3",
+    "Swamp": "M1.5 6.5h13M1.5 10.5h13M4 14.5V6.5M8 14.5V4.5M12 14.5V6.5M8 4.5 6 2.5M8 4.5l2-2",
+    "Mountain": "M1 13.5 6 4l3.2 6M7.4 13.5 11 7l4 6.5M1 13.5h14M4.6 7.2h2.8",
+    "Plains": "M1.5 13.5h13M4 13.5V5M4 7 2.2 5.2M4 7l1.8-1.8M4 10.5 2.2 8.7M4 10.5 5.8 8.7"
+              "M11 13.5V6M11 8 9.2 6.2M11 8l1.8-1.8",
+    "Mistlands": "M3 13.5 8 3l5 10.5M1.5 13.5h13M2 8.5h4M10 8.5h4M4 11h8",
+    "Ashlands": "M1.5 14.5h13M5.5 12 8 6.5 10.5 12M8 6.5 7 2 10 4.5 8 6.5",
+    "Deep North": "M8 2v12M8 4.5 5.5 2M8 4.5 10.5 2M8 9 5.5 6.5M8 9l2.5-2.5"
+                  "M2.5 13.5h11M4.5 11h7",
+    "Ocean": "M1.5 5.5 4.5 8.5 7.5 5.5 10.5 8.5 13.5 5.5M1.5 10 4.5 13 7.5 10 10.5 13 13.5 10",
+}
+# A biome appears once the boss before it is down: the Black Forest after
+# Eikthyr, the Swamp after The Elder, and so on. Meadows and Ocean are open
+# from the first day. Locked biomes are left off the dashboard and out of the
+# forecast rather than spoiling what is ahead.
+BIOME_UNLOCK = {
+    "Meadows": None, "Black Forest": "defeated_eikthyr", "Ocean": None,
+    "Swamp": "defeated_gdking", "Mountain": "defeated_bonemass",
+    "Plains": "defeated_dragon", "Mistlands": "defeated_goblinking",
+    "Ashlands": "defeated_queen", "Deep North": "defeated_fader",
+}
+
+# An arrow the page rotates to the wind's bearing.
+ARROW = "M8 14.5V2M8 2 4 6.5M8 2l4 4.5"
+
+# Each distinct path set gets one id; "Heath clear" reuses "Clear"'s.
+GLYPH_IDS = list(dict.fromkeys(list(GLYPHS.values()) + list(PHASE_GLYPHS.values())
+                                + list(BIOME_GLYPHS.values()) + [ARROW]))
+BIOME_SHORT = {"Meadows": "Meadows", "Black Forest": "B. Forest",
+               "Mountain": "Mountain", "Plains": "Plains",
+               "Deep North": "D. North", "Ocean": "Ocean"}
+
+
+def glyph_defs():
+    """Every glyph once, for the page to reference by id."""
+    syms = "".join(
+        f'<symbol id="g{i}" viewBox="0 0 16 16"><path d="{d}" fill="none"/></symbol>'
+        for i, d in enumerate(GLYPH_IDS))
+    return f'<svg class="defs" aria-hidden="true">{syms}</svg>'
+
+
+def glyph(paths, label, cls="ic"):
+    return (f'<svg class="{cls}" role="img" aria-label="{html.escape(label)}">'
+            f'<title>{html.escape(label)}</title>'
+            f'<use href="#g{GLYPH_IDS.index(paths)}"/></svg>')
+
+
+def weather_glyph(name, label):
+    return glyph(GLYPHS.get(name, GLYPHS["Misty"]), label)
+
+
+def phase_glyph(phase, cls="ic"):
+    return glyph(PHASE_GLYPHS[phase], phase, cls)
+
+
+def biome_glyph(biome):
+    return glyph(BIOME_GLYPHS[biome], biome, "ic bi")
+
+
+def milestone_label(key):
+    return MILESTONES.get(key) or (
+        key.replace("defeated_", "").replace("killed", "first ").replace("_", " ")
+        .strip().capitalize() + (" defeated" if key.startswith("defeated") else " killed"),
+        "other")
+
+
+def milestones(h):
+    """Every milestone, oldest first: when it happened and who was online.
+
+    `earliest`/`latest` bound the moment; they are equal when the server log
+    gave the exact time. `source` says which record dated it, `fight_seconds`
+    how long after the last boss summon the kill came, when both were logged.
+    """
+    state = load_milestones()
+    worlds = set(state) | {k["world"] for k in h["keys"]}
+    out = []
+    for world in worlds:
+        st = state.get(world, {})
+        windows = {}  # key -> [(lo, hi, source)], widest last
+        for key, w in st.get("live", {}).items():
+            windows.setdefault(key, []).append((w["after"], w["by"], "save"))
+        for key, w in st.get("milestones", {}).items():
+            lo = w["after"] - AUTOSAVE_SLACK if w["after"] is not None else None
+            windows.setdefault(key, []).append((lo, w["by"], "backup"))
+        logged = {}
+        for k in h["keys"]:
+            if k["world"] == world:
+                logged.setdefault(k["key"], []).append(k["ts"])
+        for key in set(windows) | set(logged):
+            wins = windows.get(key, [])
+            # The log time must agree with every window: a key the saves or
+            # backups already held before it is being re-logged (e.g. on a
+            # restart), not set. The first agreeing time is the kill.
+            exact = next((ts for ts in sorted(logged.get(key, []))
+                          if all((lo is None or ts > lo - EDGE_TOLERANCE)
+                                 and ts <= hi + EDGE_TOLERANCE for lo, hi, _ in wins)
+                          and not any(lo is None and hi < ts for lo, hi, _ in wins)), None)
+            fight = None
+            if exact is not None:
+                lo = hi = exact
+                source = "log"
+                starts = [sp["ts"] for sp in h["spawns"] if sp["world"] == world
+                          and exact - FIGHT_MAX_SECONDS <= sp["ts"] <= exact]
+                fight = round(exact - max(starts)) if starts else None
+            else:
+                bounded = [w for w in wins if w[0] is not None]
+                lo, hi, source = (min(bounded, key=lambda w: w[1] - w[0]) if bounded
+                                  else min(wins, key=lambda w: w[1]))
+            label, kind = milestone_label(key)
+            online = sorted({
+                s["player"] for s in h["sessions"]
+                if s["world"] == world and s["start"] <= hi
+                and (s["end"] is None or s["end"] >= lo)
+            }) if lo is not None else []
+            out.append({"world": world, "key": key, "label": label, "kind": kind,
+                        "earliest": lo, "latest": hi, "source": source,
+                        "fight_seconds": fight, "online": online})
+    return sorted(out, key=lambda m: m["latest"])
+
+
+def overlap(s, lo, hi):
+    end = s["end"] if s["end"] is not None else hi
+    return max(0.0, min(end, hi) - max(s["start"], lo))
+
+
+def online_now(h, now):
+    with LOCK:
+        status = dict(STATUS)
+    worlds = sorted(set(SERVERS) | {s["world"] for s in h["sessions"]})
+    out = []
+    for w in worlds:
+        players = [
+            {"name": s["player"], "since": s["start"], "seconds": now - s["start"]}
+            for s in h["sessions"] if s["world"] == w and s["end"] is None
+        ]
+        st = status.get(w, {})
+        count = st.get("count")
+        out.append({
+            "world": w,
+            "up": st.get("up", False),
+            "player_count": count,
+            "players": sorted(players, key=lambda p: p["since"]),
+            # Online per the query but not in the log -- joined before the
+            # hook existed, or before a backfill was loaded.
+            "unidentified": max(0, count - len(players)) if count is not None else 0,
+        })
+    return out
+
+
+def playtime(h, now):
+    players = {}
+
+    def row(name):
+        return players.setdefault(name, {
+            "player": name, "all": 0.0, "sessions": 0, "last_seen": 0.0,
+            "online": False, "worlds": set(), "deaths": {"all": 0},
+            **{k: 0.0 for k, _ in WINDOWS},
+        })
+
+    for s in h["sessions"]:
+        p = row(s["player"])
+        p["sessions"] += 1
+        p["all"] += overlap(s, 0, now)
+        for k, secs in WINDOWS:
+            p[k] += overlap(s, now - secs, now)
+        p["last_seen"] = max(p["last_seen"], s["end"] or now)
+        p["online"] = p["online"] or s["end"] is None
+        p["worlds"].add(s["world"])
+    for d in h["deaths"]:
+        dd = row(d["player"])["deaths"]
+        dd["all"] += 1
+        for k, secs in WINDOWS:
+            dd[k] = dd.get(k, 0) + (d["ts"] >= now - secs)
+    rows = sorted(players.values(), key=lambda p: (-p["7d"], -p["all"]))
+    for p in rows:
+        p["worlds"] = sorted(p["worlds"])
+        for k, _ in WINDOWS:
+            p["deaths"].setdefault(k, 0)
+        hours = p["all"] / 3600
+        p["deaths_per_10h"] = round(p["deaths"]["all"] / hours * 10, 1) if hours >= 1 else None
+        for k in ["all"] + [k for k, _ in WINDOWS]:
+            p[k] = round(p[k])
+    return rows
+
+
+def recent(h, now, limit):
+    out = []
+    for s in reversed(h["sessions"][-limit:]):
+        end = s["end"] if s["end"] is not None else now
+        died = sum(1 for d in h["deaths"]
+                   if d["player"] == s["player"] and d["world"] == s["world"]
+                   and s["start"] <= d["ts"] <= end)
+        out.append({"world": s["world"], "player": s["player"],
+                    "start": s["start"], "end": s["end"],
+                    "seconds": round(end - s["start"]), "deaths": died})
+    return out
+
+
+def daily(h, now, days):
+    """Per local calendar day, oldest first: hours played, deaths, areas explored."""
+    today = datetime.fromtimestamp(now, LOCAL_TZ).date()
+    out = []
+    for i in range(days - 1, -1, -1):
+        day = today - timedelta(days=i)
+        lo = datetime(day.year, day.month, day.day, tzinfo=LOCAL_TZ).timestamp()
+        hi = min(lo + 86400, now)
+        out.append({
+            "date": day.isoformat(),
+            "hours": round(sum(overlap(s, lo, hi) for s in h["sessions"]) / 3600, 2),
+            "deaths": sum(1 for d in h["deaths"] if lo <= d["ts"] < hi),
+            "explored": sum(1 for e in h["explored"] if lo <= e["ts"] < hi),
+        })
+    return out
+
+
+def fmt_dur(secs):
+    secs = int(secs)
+    if secs < 60:
+        return "&mdash;" if secs == 0 else "<1m"
+    h, m = divmod(secs // 60, 60)
+    return f"{h}h {m:02d}m" if h else f"{m}m"
+
+
+def fmt_n(n):
+    return str(n) if n else "&mdash;"
+
+
+def t(ts, fmt=""):
+    """A timestamp the page's script rewrites into the viewer's local time.
+
+    fmt: "" date and time, "w" with the weekday too, "t" the time alone,
+    "d" the weekday and date alone.
+    """
+    iso = datetime.fromtimestamp(ts, UTC).strftime("%Y-%m-%d %H:%M UTC")
+    attr = f' data-fmt="{fmt}"' if fmt else ""
+    return f'<time data-ts="{int(ts)}"{attr}>{iso}</time>'
+
+
+def t_badge(lo, hi):
+    """Date on one line, time or time window on the next, for a boss badge."""
+    if lo is None:
+        return f"before<br>{t(hi, 'd')}"
+    if lo == hi:
+        return f"{t(hi, 'd')}<br>{t(hi, 't')}"
+    if (datetime.fromtimestamp(lo, LOCAL_TZ).date()
+            != datetime.fromtimestamp(hi, LOCAL_TZ).date()):
+        return t_range(lo, hi)
+    return f"{t(lo, 'd')}<br>{t(lo, 't')}&ndash;{t(hi, 't')}"
+
+
+def t_range(lo, hi):
+    """'Sep 12, 10:06 PM – 11:36 PM', repeating the date only across midnight."""
+    if lo is None:
+        return f"before {t(hi, 'w')}"
+    if lo == hi:
+        return t(hi, "w")
+    same_day = (datetime.fromtimestamp(lo, LOCAL_TZ).date()
+                == datetime.fromtimestamp(hi, LOCAL_TZ).date())
+    return f"{t(lo, 'w')} &ndash; {t(hi, 't' if same_day else 'w')}"
+
+
+def nice_ticks(vmax):
+    """0 plus up to four round tick values covering vmax."""
+    vmax = max(vmax, 1)
+    for step in (1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000):
+        if vmax / step <= 4:
+            break
+    top = -(-vmax // step) * step
+    return [i * step for i in range(int(top // step) + 1)]
+
+
+def bar_chart(title, rows, key, tip, note=""):
+    """One single-series column chart as inline SVG. `tip` formats a value."""
+    w, ht, pl, pr, pt, pb = 600, 150, 40, 4, 10, 20
+    ticks = nice_ticks(max(r[key] for r in rows))
+    top = ticks[-1]
+    ch = ht - pt - pb
+    band = (w - pl - pr) / len(rows)
+    bw = min(24, band - 2)  # >= 2px of surface between neighbours
+    y = lambda v: pt + ch - v / top * ch
+    parts = []
+    for tv in ticks:
+        parts.append(f'<line class="grid" x1="{pl}" x2="{w - pr}" y1="{y(tv):.1f}" y2="{y(tv):.1f}"/>'
+                     f'<text class="ax" x="{pl - 6}" y="{y(tv) + 4:.1f}" text-anchor="end">{tv:g}</text>')
+    for i, r in enumerate(rows):
+        x = pl + i * band + (band - bw) / 2
+        v = r[key]
+        if v > 0:
+            y0, bh = y(v), ch * v / top
+            rad = min(4, bh, bw / 2)
+            # Rounded data end, square at the baseline.
+            parts.append(
+                f'<path class="bar" d="M{x:.1f},{y0 + bh:.1f}V{y0 + rad:.1f}'
+                f'Q{x:.1f},{y0:.1f} {x + rad:.1f},{y0:.1f}H{x + bw - rad:.1f}'
+                f'Q{x + bw:.1f},{y0:.1f} {x + bw:.1f},{y0 + rad:.1f}V{y0 + bh:.1f}Z"/>')
+        d = datetime.fromisoformat(r["date"])
+        if (len(rows) - 1 - i) % 5 == 0:  # the last day, then every fifth back
+            # The last label hangs off the right edge if centred on its bar.
+            end = i == len(rows) - 1
+            parts.append(f'<text class="ax" x="{x + bw if end else x + bw / 2:.1f}" y="{ht - 5}" '
+                         f'text-anchor="{"end" if end else "middle"}">{d.strftime("%b")} {d.day}</text>')
+        # Hit target: the whole column band, not just the bar.
+        label = f'{d.strftime("%a %b")} {d.day}: {tip(v)}'
+        parts.append(f'<rect class="hit" x="{pl + i * band:.1f}" y="{pt}" width="{band:.1f}" '
+                     f'height="{ch}" data-tip="{html.escape(label)}"/>')
+    parts.append(f'<line class="base" x1="{pl}" x2="{w - pr}" y1="{pt + ch}" y2="{pt + ch}"/>')
+    note = f'<span class="muted">{note}</span>' if note else ""
+    return (f'<figure class="chart"><figcaption>{title}{note}</figcaption>'
+            f'<svg viewBox="0 0 {w} {ht}" role="img" aria-label="{html.escape(title)}, '
+            f'last {len(rows)} days">{"".join(parts)}</svg></figure>')
+
+
+def worlds_of(h):
+    """Tab order: TRACKER_SERVERS order (the default world first), then any
+    world seen only in the logs."""
+    extra = sorted({s["world"] for s in h["sessions"]} - set(SERVERS))
+    return list(SERVERS) + extra
+
+
+def default_world(h):
+    names = worlds_of(h)
+    return DEFAULT_WORLD if DEFAULT_WORLD in names else (names[0] if names else "")
+
+
+def pick_world(h, requested):
+    """The world a request asked for, matched case-insensitively; None if
+    it named one that doesn't exist, the default if it named none."""
+    if not requested:
+        return default_world(h)
+    for w in worlds_of(h):
+        if w.lower() == requested.lower():
+            return w
+    return None
+
+
+def for_world(h, world):
+    """History narrowed to one world, in the same shape as history()."""
+    return {k: [x for x in h[k] if x["world"] == world]
+            for k in ("sessions", "deaths", "explored", "keys", "spawns")}
+
+
+def render(h, now, world):
+    status = {w["world"]: w for w in online_now(h, now)}
+
+    # Tabs: one per world, each with its live player count. Plain links, so
+    # they work without JS and the minute refresh stays on the same tab.
+    tabs = []
+    for w in worlds_of(h):
+        st = status.get(w, {})
+        n = len(st.get("players", [])) + st.get("unidentified", 0)
+        dot = '<span class="dot on"></span>' if st.get("up") else '<span class="dot"></span>'
+        count = f'<span class="tab-count">{n}</span>' if st.get("up") and n else ""
+        cur = ' aria-current="page"' if w == world else ""
+        tabs.append(f'<a class="tab" href="/?world={urllib.parse.quote(w)}"{cur}>'
+                    f'{dot}{html.escape(w)}{count}</a>')
+
+    st = status.get(world, {"up": False, "players": [], "unidentified": 0})
+    if not st["up"]:
+        body = '<p class="muted">server offline</p>'
+    elif not st["players"] and not st["unidentified"]:
+        body = '<p class="muted">nobody online</p>'
+    else:
+        items = [
+            f'<li><b>{html.escape(p["name"])}</b>'
+            f'<span class="muted"> since {t(p["since"])} &middot; '
+            f'{fmt_dur(p["seconds"])}</span></li>'
+            for p in st["players"]
+        ]
+        if st["unidentified"]:
+            items.append(f'<li class="muted">{st["unidentified"]} not yet identified</li>')
+        body = "<ul>" + "".join(items) + "</ul>"
+    n = len(st["players"]) + st["unidentified"]
+    badge = (f'<span class="dot on"></span>{n} online' if st["up"]
+             else '<span class="dot"></span>offline')
+    card = (f'<section class="card"><h3>Now<span class="badge">{badge}</span></h3>'
+            f'{body}</section>')
+
+    wx = weather_report(h, world, now)
+    if wx:
+        mins = max(1, round(wx["changes_in"] / 60))
+        tiles = "".join(
+            f'<div class="tile" data-tip="{html.escape(b["biome"])}: then '
+            f'{html.escape(b["next"])}, in about {mins}m">'
+            f'{weather_glyph(b["weather"], b["label"])}<div class="tt">'
+            f'<div class="tb">{biome_glyph(b["biome"])}{html.escape(b["biome"])}</div>'
+            f'<div class="tw">{html.escape(b["label"])}</div>'
+            f'<div class="tv">wind {round(b["wind"] * 100)}%</div></div></div>'
+            for b in wx["biomes"])
+        shown = [b["biome"] for b in wx["biomes"]]
+        steady = [b for b in weather.CONSTANT if b in shown]
+        fc = weather.forecast(wx["world_time"])
+        rows, seen, used = [], None, {}
+        for r in fc:
+            cells = ""
+            for b in shown:
+                bw = r["biomes"][b]
+                used[bw["name"]] = bw["label"]
+                cells += (f'<td data-tip="{html.escape(b)}: {html.escape(bw["label"])}">'
+                          f'{weather_glyph(bw["name"], bw["label"])}</td>')
+            day = f'{r["day"]}' if r["day"] != seen else ""
+            seen = r["day"]
+            rows.append(
+                f'<tr class="{"now " if r["now"] else ""}ph-{r["phase"]}'
+                f'{" newday" if day else ""}"><td class="num day">{day}</td>'
+                f'<td class="num">{r["clock"]}</td>'
+                f'<td data-tip="{r["phase"]}">{phase_glyph(r["phase"])}</td>{cells}'
+                f'<td class="num wind">{r["wind_from"]}'
+                f'<span class="muted"> {round(r["wind"] * 100)}</span></td></tr>')
+        heads = "".join(
+            f'<th title="{html.escape(b)}">{html.escape(BIOME_SHORT.get(b, b))}</th>'
+            for b in shown)
+        # Two weathers can share a label ("clear"); one entry each is enough.
+        by_label = {label: n for n, label in used.items()}
+        legend = " ".join(
+            f'<span class="leg">{weather_glyph(n, label)}{html.escape(label)}</span>'
+            for label, n in sorted(by_label.items()))
+        forecast = (
+            glyph_defs() +
+            '<details class="forecast"><summary>7-day forecast &mdash; the next '
+            f'{len(rows)} weather turns, about 3h 30m of play</summary>'
+            '<div class="wrap"><table class="fc"><thead><tr><th class="num">Day</th>'
+            f'<th class="num">Time</th><th></th>{heads}<th class="num">Wind</th>'
+            f'</tr></thead><tbody>{"".join(rows)}</tbody></table></div>'
+            f'<p class="legend">{legend}</p>'
+            + '<p class="muted note">An in-game day is 30 minutes of play, and the weather '
+            'turns every 11 minutes of it.'
+            # Name only the one-weather biomes this world has actually reached.
+            + (' ' + html.escape(", ".join(steady)) + (' has' if len(steady) == 1 else ' have')
+               + ' one weather each, so ' + ('its column' if len(steady) == 1
+                                             else 'their columns') + ' never change.'
+               if steady else "")
+            + '</p></details>')
+        weather_card = (
+            f'<section class="card weather">'
+            f'<div class="sky">'
+            f'<div class="sky-now">{phase_glyph(wx["phase"], "ic xl")}'
+            f'<div><b>Day {wx["day"]}</b> &middot; {wx["clock"]}'
+            f'<div class="muted">{html.escape(wx["next_phase"])} at {wx["next_phase_at"]}'
+            f', in about {max(1, round(wx["next_phase_in"] / 60))}m of play</div></div></div>'
+            f'<div class="sky-wind"><div>'
+            f'<span class="arrow" style="transform:rotate({wx["wind_angle"] + 180:.0f}deg)">'
+            f'{glyph(ARROW, "wind direction", "ic lg")}</span></div>'
+            f'<div><b>{wx["wind_from"]}</b><div class="muted">wind, changes in {mins}m</div>'
+            f'</div></div></div>'
+            f'<div class="tiles">{tiles}</div>'
+            + (f'<p class="muted note">{wx["locked"]} more biome'
+               f'{"s" if wx["locked"] != 1 else ""} unlock as bosses fall.</p>'
+               if wx["locked"] else "")
+            + ''
+            f'<p class="muted note">Valheim\'s weather and clock follow the world\'s own time, '
+            f'which only runs while someone is online; this one is counted on from the last '
+            f'autosave.</p>{forecast}</section>')
+    else:
+        weather_card = ('<section class="card weather"><h3>Weather</h3>'
+                        "<p class=\"muted\">unknown until this world's next autosave</p>"
+                        '</section>')
+
+    hw = for_world(h, world)
+    stats = playtime(hw, now)
+    rows, death_rows = [], []
+    for p in stats:
+        name = html.escape(p["player"])
+        if p["online"]:
+            name += ' <span class="dot on" title="online"></span>'
+        rows.append(
+            f'<tr><td>{name}</td>'
+            + "".join(f'<td class="num">{fmt_dur(p[k])}</td>' for k, _ in WINDOWS)
+            + f'<td class="num">{fmt_dur(p["all"])}</td>'
+            f'<td>{"online now" if p["online"] else t(p["last_seen"])}</td></tr>')
+    for p in sorted(stats, key=lambda p: (-p["deaths"]["all"], p["player"])):
+        rate = p["deaths_per_10h"]
+        death_rows.append(
+            f'<tr><td>{html.escape(p["player"])}</td>'
+            + "".join(f'<td class="num">{fmt_n(p["deaths"][k])}</td>' for k, _ in WINDOWS)
+            + f'<td class="num">{fmt_n(p["deaths"]["all"])}</td>'
+            f'<td class="num">{rate if rate is not None else "&mdash;"}</td></tr>')
+
+    recent_rows = [
+        f'<tr><td>{html.escape(r["player"])}</td>'
+        f'<td>{t(r["start"])}</td>'
+        f'<td>{t(r["end"]) if r["end"] is not None else "online"}</td>'
+        f'<td class="num">{fmt_dur(r["seconds"])}</td>'
+        f'<td class="num">{fmt_n(r["deaths"])}</td></tr>'
+        for r in recent(hw, now, 50)
+    ]
+
+    days = daily(hw, now, CHART_DAYS)
+    quiet = not any(r["hours"] or r["deaths"] or r["explored"] for r in days)
+    quiet_note = f'<p class="muted">No play on {html.escape(world)} in the last {CHART_DAYS} days.</p>'
+    charts = quiet_note if quiet else "".join([
+        bar_chart("Player-hours per day", days, "hours",
+                  lambda v: fmt_dur(v * 3600).replace("&mdash;", "none"),
+                  "Everyone's time added together, so two players on for an hour count 2h."),
+        bar_chart("Deaths per day", days, "deaths",
+                  lambda v: f"{v} death{'s' if v != 1 else ''}"),
+        bar_chart("New landmarks per day", days, "explored",
+                  lambda v: f"{v} new landmark{'s' if v != 1 else ''}",
+                  "Crypts, ruins, camps and the like, placed by the server as players "
+                  "reach new ground: a measure of exploration pace."),
+    ])
+    day_rows = [
+        f'<tr><td>{r["date"]}</td><td class="num">{fmt_dur(r["hours"] * 3600)}</td>'
+        f'<td class="num">{fmt_n(r["deaths"])}</td><td class="num">{fmt_n(r["explored"])}</td></tr>'
+        for r in reversed(days)
+    ]
+
+    ms = [m for m in milestones(h) if m["world"] == world]
+    got = {m["key"]: m for m in ms if m["kind"] == "boss"}
+    badges = []
+    for i, (key, name) in enumerate(BOSSES):
+        m = got.get(key)
+        if m:
+            party = html.escape(", ".join(m["online"]))
+            badges.append(
+                f'<div class="trophy"><div class="medal">{NUMERALS[i]}</div>'
+                f'<div class="boss">{html.escape(name)}</div>'
+                f'<div class="when">{t_badge(m["earliest"], m["latest"])}</div>'
+            + (f'<div class="fight">{fmt_dur(m["fight_seconds"])} fight</div>'
+               if m["fight_seconds"] else "")
+            + (f'<div class="party">{party}</div>' if party else "") + '</div>')
+        else:
+            # No spoilers: the name isn't anywhere in the page, not even in
+            # an attribute, until the boss is beaten.
+            badges.append(
+                f'<div class="trophy locked"><div class="medal">{NUMERALS[i]}</div>'
+                f'<div class="boss" aria-label="Unknown boss">???</div>'
+                f'<div class="when">not yet slain</div></div>')
+    ms_rows = [
+        f'<tr><td><span class="kind kind-{m["kind"]}">{html.escape(m["kind"])}</span> '
+        f'{html.escape(m["label"])}</td>'
+        f'<td>{t_range(m["earliest"], m["latest"])}</td>'
+        f'<td>{html.escape(", ".join(m["online"])) or "&mdash;"}</td></tr>'
+        for m in ms if m["kind"] != "boss"
+    ]
+
+    q = f"?world={urllib.parse.quote(world)}"
+    empty = lambda n: f'<tr><td colspan="{n}" class="muted">nothing recorded yet</td></tr>'
+    return (PAGE
+            .replace("__TITLE__", html.escape(world))
+            .replace("__TABS__", "".join(tabs))
+            .replace("__CARD__", card)
+            .replace("__WEATHER__", weather_card)
+            .replace("__TROPHIES__", f'<div class="trophies">{"".join(badges)}</div>')
+            .replace("__MILESTONES__", "\n".join(ms_rows) or empty(3))
+            .replace("__PLAYTIME__", "\n".join(rows) or empty(6))
+            .replace("__DEATHS__", "\n".join(death_rows) or empty(6))
+            .replace("__CHARTS__", charts)
+            .replace("__DAILY__", "\n".join(day_rows))
+            .replace("__RECENT__", "\n".join(recent_rows) or empty(5))
+            .replace("__Q__", q)
+            .replace("__TS__", t(now)))
+
+
+# Tokens (__CARD__ etc.) are filled by str.replace so the inline CSS/JS
+# braces don't need escaping.
+PAGE = """<!doctype html>
+<html><head><meta charset="utf-8">
+<title>__TITLE__ &middot; Skald</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Averia+Serif+Libre:wght@400;700&family=Cinzel:wght@600;
+  700&display=swap" rel="stylesheet">
+<meta http-equiv="refresh" content="60">
+<style>
+ /* Valheim's in-game look: dark wood-and-stone panels, bronze trim, gold
+    headings, parchment text. Dark in both color schemes, like the game. */
+ :root{color-scheme:dark;
+  --bg:#0e0b08;--panel:#1c1610;--panel-2:#241c14;--line:#3b2e20;--bronze:#8a6a3f;
+  --gold:#e8b25a;--gold-dim:#cfa266;--fg:#eadcc0;--muted:#a8977a;--on:#8fc46a;
+  --series-1:#c9822e;
+  --display:'Cinzel',Georgia,serif;--body:'Averia Serif Libre',Georgia,serif}
+ body{font:15px/1.5 var(--body);margin:0 auto;max-width:62rem;padding:1.75rem 1rem 3rem;color:var(--fg);
+  background:radial-gradient(ellipse 120% 60% at 50% 0%,#2a2016 0%,var(--bg) 70%) fixed,var(--bg)}
+ a{color:var(--gold)} a:hover{color:#f6cf86}
+ h1{font:700 1.9rem/1.1 var(--display);color:var(--gold);letter-spacing:.06em;text-align:center;margin:0;
+  text-shadow:0 1px 0 #000,0 0 18px rgba(232,178,90,.25)}
+ .divider{display:block;margin:.5rem auto .4rem;width:min(22rem,80%);height:14px}
+ h2{font:600 1.1rem/1.2 var(--display);color:var(--gold);letter-spacing:.05em;margin:2.1rem 0 .7rem;
+  display:flex;align-items:center;gap:.75rem}
+ h2::after{content:"";flex:1;height:1px;background:linear-gradient(90deg,var(--bronze),transparent)}
+ h3{font:600 .95rem var(--display);margin:0 0 .4rem;display:flex;justify-content:space-between;gap:1rem;
+  color:var(--gold-dim);letter-spacing:.03em}
+ h3.world{margin:1rem 0 .5rem;font-size:.85rem;color:var(--muted)}
+ .meta,.muted{color:var(--muted)} .meta{text-align:center;font-size:.85rem;margin-bottom:1.5rem}
+ .panel,.card,table,.chart,.trophy{background:linear-gradient(180deg,#211a12,var(--panel));border:1px solid var(--line);
+  border-radius:3px;box-shadow:inset 0 0 0 1px rgba(232,178,90,.05),0 2px 10px rgba(0,0,0,.45)}
+ /* World tabs: carved-plank look, gold when selected. */
+ .tabs{display:flex;gap:.35rem;border-bottom:1px solid var(--bronze);margin-bottom:1.1rem;overflow-x:auto;
+  scrollbar-width:none}
+ .tab{display:flex;align-items:center;gap:.1rem;padding:.55rem 1rem .5rem;font:600 .95rem var(--display);
+  letter-spacing:.05em;
+  color:var(--muted);text-decoration:none;border:1px solid transparent;border-bottom:0;border-radius:3px 3px 0 0;
+  white-space:nowrap;margin-bottom:-1px}
+ .tab:hover{color:var(--gold-dim);background:rgba(232,178,90,.04)}
+ .tab[aria-current="page"]{color:var(--gold);background:linear-gradient(180deg,#2a2016,var(--bg));
+  border-color:var(--bronze);
+  box-shadow:inset 0 2px 0 var(--gold)}
+ .tab-count{font:400 .72rem var(--body);background:var(--line);color:var(--fg);border-radius:9px;padding:0 .4rem;
+  margin-left:.45rem}
+ .card{padding:.8rem .95rem}
+ .card ul{margin:0;padding:0;list-style:none} .card li{padding:.15rem 0} .card p{margin:0}
+ /* Weather dashboard: a sky strip, then one tile per biome. */
+ .weather{margin-top:.75rem;padding:.9rem 1rem 1rem}
+ .sky{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:1rem;
+  padding-bottom:.8rem;margin-bottom:.9rem;border-bottom:1px solid var(--line)}
+ .sky-now,.sky-wind{display:flex;align-items:center;gap:.7rem}
+ .sky-now b,.sky-wind b{font:700 1.05rem var(--display);color:var(--gold);letter-spacing:.04em}
+ .sky .muted{font-size:.8rem}
+ .arrow{display:inline-block;color:var(--gold-dim)}
+ .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(8.6rem,1fr));gap:.55rem}
+ .tt{display:flex;flex-direction:column;gap:.1rem}
+ .tile{display:flex;flex-direction:column;align-items:center;gap:.15rem;text-align:center;
+  padding:.65rem .4rem .55rem;border:1px solid var(--line);border-radius:3px;
+  background:linear-gradient(180deg,rgba(232,178,90,.035),transparent)}
+ .tile:hover{border-color:var(--bronze)}
+ .tile .ic{color:var(--gold);margin:.15rem 0}
+ .tb{display:flex;align-items:center;gap:.3rem;font:600 .72rem var(--display);
+  color:var(--gold-dim);letter-spacing:.05em;text-transform:uppercase}
+ .tb .ic{color:var(--bronze);margin:0}
+ .tw{font-size:.88rem} .tv{font-size:.72rem;color:var(--muted);font-variant-numeric:tabular-nums}
+ /* Once there is room, tiles run wide with the glyph beside the text. */
+ @media (min-width:52rem){.tiles{grid-template-columns:repeat(3,1fr);gap:.6rem}
+  .tile{flex-direction:row;justify-content:flex-start;text-align:left;gap:.8rem;padding:.75rem .9rem}
+  .tile .ic{width:34px;height:34px;flex:0 0 34px;margin:0}
+  .tw{font-size:.95rem}}
+ .weather .note{margin-top:.5rem}
+ .phase{font:600 .68rem var(--display);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);
+  border:1px solid var(--line);border-radius:2px;padding:0 .35rem;margin-right:.35rem}
+ .ph-night .phase,.phase-line .phase{color:var(--gold-dim);border-color:var(--bronze)}
+ .forecast tbody tr.now td{background:rgba(232,178,90,.07)}
+ .forecast tbody tr.ph-night td{color:var(--muted)}
+ .forecast summary{color:var(--gold-dim);font:600 .85rem var(--display);letter-spacing:.03em}
+ /* Compact icon grid: the glyphs carry the weather, the tooltip names it. */
+ .defs{display:none}
+ .ic{width:15px;height:15px;stroke:currentColor;stroke-width:1.5;stroke-linecap:square;vertical-align:-3px}
+ .ic.bi{width:13px;height:13px;stroke-width:1.3;vertical-align:-2px}
+ .ic.lg{width:26px;height:26px;stroke-width:1.4;vertical-align:-6px}
+ .ic.xl{width:34px;height:34px;stroke-width:1.3;vertical-align:-9px;color:var(--gold)}
+ .tile .ic{width:30px;height:30px;stroke-width:1.4}
+ .fc{font-size:.8rem} .fc th,.fc td{padding:.16rem .45rem;text-align:center}
+ .fc th{font-size:.66rem;padding:.3rem .45rem}
+ .fc th.num,.fc td.num{text-align:right} .fc td.day{color:var(--gold-dim);font-weight:700}
+ .fc tbody tr.newday td{border-top:1px solid var(--bronze)}
+ .fc td.wind{font-variant-numeric:tabular-nums;white-space:nowrap}
+ .fc tbody tr:hover td{background:rgba(232,178,90,.05)}
+ .legend{display:flex;flex-wrap:wrap;gap:.2rem .9rem;margin-top:.5rem;font-size:.76rem;color:var(--muted)}
+ .leg{display:inline-flex;align-items:center;gap:.25rem}
+ .badge{font:400 .85rem var(--body);color:var(--muted);white-space:nowrap;letter-spacing:0}
+ .dot{display:inline-block;width:.55rem;height:.55rem;border-radius:50%;background:#5d5040;margin-right:.35rem;
+  vertical-align:.05rem}
+ .dot.on{background:var(--on);box-shadow:0 0 6px rgba(143,196,106,.6)}
+ /* Boss achievements: lit gold medallions, dim and locked until earned. */
+ .trophies{display:grid;grid-template-columns:repeat(auto-fill,minmax(7.4rem,1fr));gap:.55rem}
+ .trophy{padding:.9rem .6rem .8rem;text-align:center;display:flex;flex-direction:column;align-items:center;gap:.25rem}
+ .medal{width:3.3rem;height:3.3rem;border-radius:50%;display:grid;place-items:center;margin-bottom:.3rem;
+  font:700 1.05rem var(--display);color:#2a1a08;border:2px solid var(--gold);
+  background:radial-gradient(circle at 35% 30%,#f7d98f,#c48b35 55%,#6b4516);
+  box-shadow:0 0 16px rgba(232,178,90,.35),inset 0 -3px 6px rgba(0,0,0,.35)}
+ .trophy .boss{font:700 .95rem var(--display);color:var(--gold);letter-spacing:.03em}
+ .trophy .when{font-size:.78rem;color:var(--fg)} .trophy .party{font-size:.74rem;color:var(--muted)}
+ .trophy .fight{font:600 .7rem var(--display);color:var(--gold-dim);letter-spacing:.05em;text-transform:uppercase}
+ .trophy.locked{background:#15110c;box-shadow:none}
+ .trophy.locked .medal{background:#211b14;border-color:#4a3d2d;color:#6f6150;box-shadow:none}
+ .trophy.locked .boss{color:#948469;letter-spacing:.2em} .trophy.locked .when{color:#857760;font-style:italic}
+ .wrap{overflow-x:auto}
+ table{border-collapse:collapse;width:100%}
+ th,td{text-align:left;padding:.45rem .65rem;border-bottom:1px solid var(--line);white-space:nowrap}
+ tr:last-child td{border-bottom:0}
+ th{background:var(--panel-2);font:600 .76rem var(--display);color:var(--gold-dim);letter-spacing:.06em;
+  text-transform:uppercase}
+ tbody tr:hover td{background:rgba(232,178,90,.04)}
+ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+ .kind{display:inline-block;font:600 .66rem var(--display);padding:.05rem .4rem;border-radius:2px;
+  border:1px solid var(--line);
+  color:var(--muted);margin-right:.4rem;text-transform:uppercase;letter-spacing:.06em;vertical-align:.1rem}
+ .kind-mini-boss{border-color:var(--bronze);color:var(--gold-dim)}
+ .note{font-size:.8rem;margin-top:.5rem}
+ .charts{display:grid;gap:.75rem}
+ .chart{margin:0;padding:.7rem .8rem .35rem}
+ .chart figcaption{font:600 .9rem var(--display);color:var(--gold-dim);letter-spacing:.03em;margin-bottom:.2rem}
+ .chart figcaption span{display:block;font:400 .8rem var(--body);color:var(--muted);letter-spacing:0}
+ .chart svg{display:block;width:100%;height:auto}
+ .chart .bar{fill:var(--series-1)} .chart .grid{stroke:var(--line);stroke-width:1}
+ .chart .base{stroke:var(--bronze);stroke-width:1} .chart .ax{fill:var(--muted);font-size:10px;font-family:var(--body)}
+ /* The SVG scales with its box; keep axis text legible at phone width. */
+ @media (max-width:640px){.chart .ax{font-size:19px} h1{font-size:1.5rem}
+  .tabs{gap:.15rem} .tab{padding:.5rem .55rem .45rem;font-size:.8rem;
+  letter-spacing:.03em} .tab-count{margin-left:.3rem}}
+ .chart .hit{fill:transparent} .chart .hit:hover{fill:var(--gold);fill-opacity:.07}
+ #tip{position:fixed;pointer-events:none;background:#0b0907;color:var(--fg);border:1px solid var(--bronze);
+  font-size:12px;
+  padding:.25rem .55rem;border-radius:2px;display:none;white-space:nowrap}
+ details{margin-top:.6rem} summary{cursor:pointer;color:var(--muted)}
+ details table{margin-top:.5rem}
+</style></head><body>
+<h1>Skald</h1>
+<svg class="divider" viewBox="0 0 352 14" aria-hidden="true">
+ <line x1="0" y1="7" x2="150" y2="7" stroke="#8a6a3f"/><line x1="202" y1="7" x2="352" y2="7" stroke="#8a6a3f"/>
+ <path d="M176 1 L182 7 L176 13 L170 7 Z" fill="#e8b25a"/>
+ <path d="M160 7 L164 3 L168 7 L164 11 Z M184 7 L188 3 L192 7 L188 11 Z" fill="#8a6a3f"/>
+</svg>
+<div class="meta">updated __TS__ &middot; refreshes every minute &middot;
+ <a href="/api/online__Q__">online</a> &middot; <a href="/api/playtime__Q__">playtime</a> &middot;
+ <a href="/api/daily__Q__">daily</a> JSON</div>
+<nav class="tabs" aria-label="Worlds">__TABS__</nav>
+__CARD__
+__WEATHER__
+<h2>Bosses slain</h2>
+__TROPHIES__
+<h2>Other milestones</h2>
+<div class="wrap"><table><thead><tr>
+ <th>Milestone</th><th>When</th><th>Online at the time</th>
+</tr></thead><tbody>
+__MILESTONES__
+</tbody></table></div>
+<p class="muted note">Kills the server logged show their exact time, and how long after the boss
+ was summoned it fell. Earlier ones are dated from the world's autosaves (a 30-minute window) or, before
+ those were watched, its hourly backups (about 90 minutes).</p>
+<h2>Playtime</h2>
+<div class="wrap"><table><thead><tr>
+ <th>Player</th><th class="num">24h</th><th class="num">7 days</th><th class="num">30 days</th>
+ <th class="num">All time</th><th>Last seen</th>
+</tr></thead><tbody>
+__PLAYTIME__
+</tbody></table></div>
+<h2>Deaths</h2>
+<div class="wrap"><table><thead><tr>
+ <th>Player</th><th class="num">24h</th><th class="num">7 days</th><th class="num">30 days</th>
+ <th class="num">All time</th><th class="num">Per 10h played</th>
+</tr></thead><tbody>
+__DEATHS__
+</tbody></table></div>
+<h2>Last 30 days</h2>
+<div class="charts">
+__CHARTS__
+</div>
+<details><summary>Show as a table</summary>
+<div class="wrap"><table><thead><tr>
+ <th>Date</th><th class="num">Played</th><th class="num">Deaths</th><th class="num">New landmarks</th>
+</tr></thead><tbody>
+__DAILY__
+</tbody></table></div></details>
+<h2>Recent sessions</h2>
+<div class="wrap"><table><thead><tr>
+ <th>Player</th><th>Joined</th><th>Left</th><th class="num">Length</th><th class="num">Deaths</th>
+</tr></thead><tbody>
+__RECENT__
+</tbody></table></div>
+<div id="tip"></div>
+<script>
+ const o={month:'short',day:'numeric',hour:'numeric',minute:'2-digit'};
+ const fmts={'':new Intl.DateTimeFormat(undefined,o),w:new Intl.DateTimeFormat(undefined,{weekday:'short',...o}),
+  t:new Intl.DateTimeFormat(undefined,{hour:'numeric',minute:'2-digit'}),
+  d:new Intl.DateTimeFormat(undefined,{weekday:'short',month:'short',day:'numeric'})};
+ for(const el of document.querySelectorAll('time[data-ts]'))
+  el.textContent=(fmts[el.dataset.fmt||'']).format(new Date(el.dataset.ts*1000));
+ const tip=document.getElementById('tip');
+ document.addEventListener('pointermove',e=>{
+  const el=e.target.closest&&e.target.closest('[data-tip]');
+  if(!el){tip.style.display='none';return;}
+  tip.textContent=el.dataset.tip; tip.style.display='block';
+  const x=Math.min(e.clientX+12,innerWidth-tip.offsetWidth-8);
+  tip.style.left=x+'px'; tip.style.top=(e.clientY-34)+'px';});
+</script>
+</body></html>"""
+
+
+class Handler(BaseHTTPRequestHandler):
+    # Don't advertise the Python version to the internet.
+    server_version = "skald"
+    sys_version = ""
+
+    def _send(self, code, body, ctype):
+        b = body.encode() if isinstance(body, str) else body
+        self.send_response(code)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(b)))
+        self.end_headers()
+        self.wfile.write(b)
+
+    def _json(self, obj):
+        self._send(200, json.dumps(obj, indent=2), "application/json")
+
+    def do_GET(self):
+        path, _, query = self.path.partition("?")
+        if path == "/healthz":
+            return self._send(200, "ok", "text/plain")
+
+        params = urllib.parse.parse_qs(query)
+
+        def arg(name, default):
+            v = params.get(name, [""])[0]
+            return int(v) if v.isdigit() else default
+
+        now = time.time()
+        h = history()
+        # The page always shows one world (the default if none is named);
+        # the API covers every world unless ?world= narrows it.
+        requested = params.get("world", [""])[0]
+        world = pick_world(h, requested)
+        if world is None:
+            return self._send(404, "no such world", "text/plain")
+        hw = for_world(h, world) if requested else h
+        if path == "/api/online":
+            self._json({"worlds": [w for w in online_now(h, now)
+                                   if not requested or w["world"] == world]})
+        elif path == "/api/playtime":
+            self._json({"players": playtime(hw, now)})
+        elif path == "/api/sessions":
+            self._json({"sessions": recent(hw, now, arg("limit", 100))})
+        elif path == "/api/deaths":
+            self._json({"deaths": list(reversed(hw["deaths"][-arg("limit", 100):]))})
+        elif path == "/api/weather":
+            self._json({"worlds": [r for w in worlds_of(h)
+                                   if (not requested or w == world)
+                                   and (r := weather_report(h, w, now))]})
+        elif path == "/api/milestones":
+            self._json({"milestones": [m for m in milestones(h)
+                                       if not requested or m["world"] == world]})
+        elif path == "/api/daily":
+            self._json({"days": daily(hw, now, max(1, min(arg("days", CHART_DAYS), 366)))})
+        elif path in ("/", "/index.html"):
+            self._send(200, render(h, now, world), "text/html; charset=utf-8")
+        else:
+            self._send(404, "not found", "text/plain")
+
+    def log_message(self, *a):
+        pass  # keep the container logs quiet
+
+
+def main():
+    # The hooks run as the game containers' uid (1024), and a fresh named
+    # volume is root-owned 0755 -- open it up so their appends succeed.
+    os.makedirs(EVENTS_DIR, exist_ok=True)
+    os.chmod(EVENTS_DIR, 0o1777)
+    os.makedirs(DATA_DIR, exist_ok=True)
+    threading.Thread(target=poller, daemon=True).start()
+    threading.Thread(target=milestone_poller, daemon=True).start()
+    print(f"skald listening on :{PORT}, worlds={sorted(SERVERS)}", flush=True)
+    ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
+
+
+if __name__ == "__main__":
+    main()

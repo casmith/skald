@@ -1,0 +1,27 @@
+[project]
+name = "skald"
+version = "0.0.1"
+description = "Player and world dashboard for Valheim servers"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+skald = "skald.app:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["skald"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "UP", "B", "SIM"]
+ignore = ["E731"]
