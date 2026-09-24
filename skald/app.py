@@ -1096,6 +1096,64 @@ def for_world(h, world):
             for k in ("sessions", "deaths", "explored", "keys", "spawns")}
 
 
+def for_players(h, names):
+    """History narrowed to a set of characters, in the shape history() has.
+
+    `explored`, `keys` and `spawns` are the world's, not a player's, so they
+    empty out rather than being attributed to whoever happened to be on --
+    which is also why the personal charts are hours and deaths only.
+    """
+    names = set(names)
+    return {"sessions": [x for x in h["sessions"] if x["player"] in names],
+            "deaths": [x for x in h["deaths"] if x["player"] in names],
+            "explored": [], "keys": [], "spawns": []}
+
+
+def me_stats(h, now, names, primary):
+    """Your numbers: the dashboard's own tables, narrowed to your characters.
+
+    Deliberately derived from the same functions the public page uses, so
+    there is one definition of an hour played and one of a death, and your
+    page cannot drift from the table you appear in.
+    """
+    mine = for_players(h, names)
+    rows = {r["player"]: r for r in playtime(mine, now)}
+    me = rows.get(primary)
+    if not me:
+        return None
+    sessions = [x for x in mine["sessions"] if x["player"] == primary]
+    longest = max(sessions, key=lambda x: overlap(x, 0, now), default=None)
+
+    # Where you stand, ranked among every character on the server -- the same
+    # unit the dashboard's table uses, so the two agree.
+    group = playtime(h, now)
+    by_hours = sorted(group, key=lambda p: -p["all"])
+    dangerous = sorted((p for p in group if p["deaths_per_10h"] is not None),
+                       key=lambda p: p["deaths_per_10h"])
+    def place(rank_rows):
+        names_ = [p["player"] for p in rank_rows]
+        return ((names_.index(primary) + 1, len(names_))
+                if primary in names_ else None)
+
+    other = sum(r["all"] for n, r in rows.items() if n != primary)
+    return {
+        "character": primary,
+        "windows": [(k, me[k], me["deaths"][k]) for k, _ in WINDOWS],
+        "all": me["all"], "deaths": me["deaths"]["all"],
+        "deaths_per_10h": me["deaths_per_10h"],
+        "sessions": me["sessions"], "online": me["online"],
+        "worlds": me["worlds"], "last_seen": me["last_seen"],
+        "first_seen": min((x["start"] for x in sessions), default=None),
+        "longest": ({"seconds": round(overlap(longest, 0, now)),
+                     "start": longest["start"], "world": longest["world"]}
+                    if longest else None),
+        "rank_hours": place(by_hours), "rank_deaths": place(dangerous),
+        "other_seconds": round(other),
+        "days": daily(for_players(h, [primary]), now, CHART_DAYS),
+        "recent": recent(for_players(h, [primary]), now, 10),
+    }
+
+
 def render(h, now, world, user=None):
     status = {w["world"]: w for w in online_now(h, now)}
 
@@ -1621,8 +1679,8 @@ def yes_no(ok, good="yes", bad="no"):
     return f'<span class="{cls}">{good if ok else bad}</span>'
 
 
-def render_me(user, chars, rows_db):
-    """Your characters: the ones the log says are yours, and which one is you."""
+def render_me(user, chars, rows_db, stats=None):
+    """Your page: your numbers, your characters, your last few evenings."""
     state = {r["name"]: r for r in rows_db}
     primary = next((r["name"] for r in rows_db if r["is_primary"]), None)
     chosen = bool(primary and state[primary]["chosen"])
@@ -1668,8 +1726,82 @@ def render_me(user, chars, rows_db):
         lead = (f'You are <b>{html.escape(primary)}</b> &mdash; your most-played '
                 'character, picked automatically. Choose one yourself and it stays put.')
     return (ME_PAGE.replace("__WHO__", f"{avatar}<span>{who}</span>")
+            .replace("__STATS__", render_my_stats(stats))
             .replace("__BODY__", body)
-            .replace("__LEAD__", f'<p class="note">{lead}</p>' if lead else ""))
+            .replace("__LEAD__", f'<p class="note">{lead}</p>' if lead else "")
+            .replace("__SESSIONS__", render_my_sessions(stats)))
+
+
+def ordinal(n):
+    suffix = "th" if 11 <= n % 100 <= 13 else {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+    return f"{n}{suffix}"
+
+
+def stat(value, label):
+    return f'<div class="stat"><div class="v">{value}</div><div class="k">{label}</div></div>'
+
+
+def render_my_stats(st):
+    """The headline: what you have done, and where that puts you."""
+    if not st:
+        return ""
+    cells = [stat(fmt_dur(secs), label) for label, secs in
+             [("last 24 hours", st["windows"][0][1]),
+              ("last 7 days", st["windows"][1][1]),
+              ("last 30 days", st["windows"][2][1]),
+              ("all time", st["all"])]]
+    deaths = st["deaths"]
+    per10 = "&mdash;" if st["deaths_per_10h"] is None else f'{st["deaths_per_10h"]:g}'
+    cells.append(stat(fmt_n(deaths), "death" if deaths == 1 else "deaths"))
+    cells.append(stat(per10, "deaths / 10h"))
+
+    plural = "" if st["sessions"] == 1 else "s"
+    facts = [f'<b>{st["sessions"]}</b> session{plural}']
+    if st["first_seen"]:
+        facts.append(f'first seen {t(st["first_seen"], "d")}')
+    if st["longest"] and st["longest"]["seconds"] >= 60:
+        facts.append(f'longest {fmt_dur(st["longest"]["seconds"])} '
+                     f'on {t(st["longest"]["start"], "d")}')
+    if st["worlds"]:
+        facts.append("on " + html.escape(", ".join(st["worlds"])))
+    if st["other_seconds"] >= 60:
+        facts.append(f'{fmt_dur(st["other_seconds"])} more as your other characters')
+
+    ranks = []
+    if st["rank_hours"]:
+        n, of = st["rank_hours"]
+        ranks.append(f'<b>{ordinal(n)}</b> of {of} by hours played')
+    if st["rank_deaths"]:
+        # Ascending, so first is the most careful. Said plainly rather than
+        # ranked as "best": dying a lot is not losing at Valheim.
+        n, of = st["rank_deaths"]
+        ranks.append(f'<b>{ordinal(n)}</b> of {of} fewest deaths per hour')
+
+    charts = ""
+    if any(d["hours"] or d["deaths"] for d in st["days"]):
+        charts = (bar_chart("Your hours per day", st["days"], "hours",
+                            lambda v: fmt_dur(v * 3600).replace("&mdash;", "none"))
+                  + bar_chart("Your deaths per day", st["days"], "deaths",
+                              lambda v: f"{v} death{'s' if v != 1 else ''}"))
+    online = ' <span class="on">online now</span>' if st["online"] else ""
+    rank_line = f'<p class="facts">{" &middot; ".join(ranks)}</p>' if ranks else ""
+    return (f'<h2>{html.escape(st["character"])}{online}</h2>'
+            f'<div class="stats">{"".join(cells)}</div>'
+            f'<p class="facts">{" &middot; ".join(facts)}</p>{rank_line}{charts}')
+
+
+def render_my_sessions(st):
+    if not st or not st["recent"]:
+        return ""
+    ONLINE = '<span class="on">online</span>'
+    rows = "".join(
+        f'<tr><td>{html.escape(r["world"])}</td><td>{t(r["start"])}</td>'
+        f'<td>{t(r["end"]) if r["end"] is not None else ONLINE}</td>'
+        f'<td>{fmt_dur(r["seconds"])}</td><td>{fmt_n(r["deaths"])}</td></tr>'
+        for r in st["recent"])
+    return ('<h2>Your last few</h2><div class="wrap"><table><thead><tr><th>World</th>'
+            '<th>From</th><th>To</th><th>Played</th><th>Deaths</th></tr></thead>'
+            f'<tbody>{rows}</tbody></table></div>')
 
 
 def _button(action, name, label):
@@ -1679,7 +1811,7 @@ def _button(action, name, label):
 
 
 ME_PAGE = """<!doctype html>
-<html><head><meta charset="utf-8"><title>Your characters &middot; Skald</title>
+<html><head><meta charset="utf-8"><title>You &middot; Skald</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Averia+Serif+Libre:wght@400;700&display=swap" rel="stylesheet">
@@ -1709,11 +1841,37 @@ ME_PAGE = """<!doctype html>
   color:var(--muted)}
  tr.off td{opacity:.45}
  p.note{color:var(--muted);font-size:.85rem}
+ h2{font:600 1.05rem 'Cinzel',Georgia,serif;color:var(--gold);letter-spacing:.05em;
+  margin:2rem 0 .7rem;display:flex;align-items:center;gap:.7rem}
+ h2::after{content:"";flex:1;height:1px;background:linear-gradient(90deg,var(--bronze),transparent)}
+ h2 .on{font:400 .8rem 'Averia Serif Libre',Georgia,serif;letter-spacing:0;text-transform:none}
+ .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(7rem,1fr));gap:.6rem}
+ .stat{background:linear-gradient(180deg,#211a12,var(--panel));border:1px solid var(--line);
+  border-radius:3px;padding:.6rem .7rem;text-align:center}
+ .stat .v{font:600 1.2rem 'Cinzel',Georgia,serif;color:var(--gold)}
+ .stat .k{font-size:.72rem;color:var(--muted);letter-spacing:.04em;text-transform:uppercase}
+ .facts{color:var(--muted);font-size:.85rem;margin:.6rem 0 0}
+ .facts b{color:var(--gold-dim);font-weight:400}
+ /* The same chart the dashboard draws, so the two read alike. */
+ .chart{background:linear-gradient(180deg,#211a12,var(--panel));border:1px solid var(--line);
+  border-radius:3px;padding:.7rem .8rem .35rem;margin:.8rem 0 0}
+ .chart figcaption{font:600 .9rem 'Cinzel',Georgia,serif;color:var(--gold-dim);
+  letter-spacing:.03em;margin-bottom:.2rem}
+ .chart svg{display:block;width:100%;height:auto}
+ .chart .bar{fill:#c9822e} .chart .grid{stroke:var(--line);stroke-width:1}
+ .chart .base{stroke:var(--bronze);stroke-width:1}
+ .chart .ax{fill:var(--muted);font-size:10px;font-family:'Averia Serif Libre',Georgia,serif}
+ /* No tooltip layer on this page, so the hit areas only need to stay invisible. */
+ .chart .hit{fill:transparent}
+ @media (max-width:640px){.chart .ax{font-size:19px}}
 </style></head><body>
-<h1>Your characters</h1>
+<h1>You</h1>
 <div class="who">__WHO__ &middot; <a href="/">back to the dashboard</a></div>
+__STATS__
+<h2>Your characters</h2>
 __BODY__
 __LEAD__
+__SESSIONS__
 <p class="note">Only characters this Steam account has been seen playing are listed &mdash; Skald
  reads that pairing from the server&rsquo;s own log, so there is nothing to type in, nothing to
  prove, and no way to take a character you have not played. None of it is public: your
@@ -1978,8 +2136,10 @@ class Handler(BaseHTTPRequestHandler):
             if not user:
                 return self._redirect("/auth/login" if CONFIG.steam_login else "/")
             mine = sync_user(db(), user, h, now)
-            self._send(200, render_me(user, mine,
-                                      store.characters(db(), user["steam_id"])),
+            rows = store.characters(db(), user["steam_id"])
+            stats = (me_stats(h, now, [c["name"] for c in rows if not c["hidden"]],
+                              user["character"]) if user["character"] else None)
+            self._send(200, render_me(user, mine, rows, stats),
                        "text/html; charset=utf-8")
         elif path in ("/", "/index.html"):
             user = current_user(self.headers)

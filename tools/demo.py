@@ -153,7 +153,8 @@ def render(cfg, into, now):
     mine = app.sync_user(app.db(), user, h, now)
     pages = {"dashboard.html": app.render(h, now, "Midgard"),
              "characters.html": app.render_me(
-                 user, mine, store.characters(app.db(), steam)),
+                 user, mine, store.characters(app.db(), steam),
+                 app.me_stats(h, now, [c["name"] for c in mine], user["character"])),
              "diagnostics.html": app.render_diagnostics(app.diagnostics(h, now))}
     pages["forecast.html"] = pages["dashboard.html"].replace(
         '<details class="forecast">', '<details class="forecast" open>')
