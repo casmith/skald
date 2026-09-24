@@ -1219,7 +1219,7 @@ def render(h, now, world, user=None):
                 f'{" newday" if day else ""}"><td class="num day">{day}</td>'
                 f'<td class="num">{r["clock"]}</td>'
                 f'<td data-tip="{r["phase"]}">{phase_glyph(r["phase"])}</td>{cells}'
-                f'<td class="num wind">{r["wind_from"]}'
+                f'<td class="num wind">{r["wind_dir"]}'
                 f'<span class="muted"> {round(r["wind"] * 100)}</span></td></tr>')
         heads = "".join(
             f'<th title="{html.escape(b)}">{html.escape(BIOME_SHORT.get(b, b))}</th>'
@@ -1253,9 +1253,9 @@ def render(h, now, world, user=None):
             f'<div class="muted">{html.escape(wx["next_phase"])} at {wx["next_phase_at"]}'
             f', in about {max(1, round(wx["next_phase_in"] / 60))}m of play</div></div></div>'
             f'<div class="sky-wind"><div>'
-            f'<span class="arrow" style="transform:rotate({wx["wind_angle"] + 180:.0f}deg)">'
+            f'<span class="arrow" style="transform:rotate({wx["wind_angle"]:.0f}deg)">'
             f'{glyph(ARROW, "wind direction", "ic lg")}</span></div>'
-            f'<div><b>{wx["wind_from"]}</b><div class="muted">wind, changes in {mins}m</div>'
+            f'<div><b>{wx["wind_dir"]}</b><div class="muted">wind, changes in {mins}m</div>'
             f'</div></div></div>'
             f'<div class="tiles">{tiles}</div>'
             + (f'<p class="muted note">{wx["locked"]} more biome'
