@@ -111,3 +111,50 @@ taken into SQLite once, keyed by its own text, so a backfill can overlap the
 live file harmlessly and a rotated or trimmed file loses nothing. History
 outlives the files: back up `data_dir/skald.db` and the event files are
 replaceable.
+
+## How the world is set up
+
+Valheim's world modifiers — combat, death penalty, resources, raids,
+portals — are not stored in the world. They are command-line state, passed
+to the server at startup, and they reach Skald two ways, neither of which is
+enough on its own.
+
+**The log says which.** Starting a server with modifiers writes one line per
+setting, in words:
+
+```
+Setting world modifier: combat->veryhard
+Setting world modifier: deathpenalty->casual
+```
+
+A **preset** writes one line and is not expanded, so a world reports either
+a preset or a list of settings, depending on how it was started:
+
+```
+Setting world modifier preset: hard
+```
+
+These are written **once, at startup, and never again**. A server already
+running when Skald starts watching will not repeat them; they arrive on its
+next restart, and Skald keeps them from then on.
+
+**The Steam tags say whether.** The server advertises its modifiers in the
+`m=` field of the tags Skald already polls every minute:
+
+```
+g=1.0.15,n=40,m=0=70,1=200,14=120,15=140,40=1_10:2_6:3_5:4_1:5_6,19,13=15,4=200,3=0,35
+```
+
+That is a list of numeric *effect* ids, not names. They are undocumented,
+built at runtime, and nothing stops an update renumbering them — so Skald
+reads this field only as **empty or not**. A world whose tag is not empty is
+modified; what it says beyond that is not trusted.
+
+Together they cover the awkward case: a modified world whose startup went
+unwatched is reported as modified, with Skald saying plainly that it will
+know which settings the next time that server starts.
+
+**Not covered:** the boolean toggles set with `-setkey` (no build cost,
+passive mobs, no map) write nothing to the log at all — they appear only as
+bare numbers in `m=`. Skald counts a world with them as modified and cannot
+name them.

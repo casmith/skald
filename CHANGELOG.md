@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+## 0.5.0
+
+- **How the world is set up**, under the tabs: combat, death penalty,
+  resources, raids and portals, or the name of the preset the server was
+  started with. Verified against a real server rather than guessed.
+- Two sources, because neither is enough alone. The server logs its
+  modifiers **in words**, once, at startup — that is where the names come
+  from. It also advertises them in its Steam tags as `m=`, which Skald reads
+  only as a **yes or no**: the ids in it are undocumented, built at runtime
+  and free to be renumbered by any update, and a confidently wrong
+  "Very Hard" is worse than no answer. Between them, the tag says *whether*
+  a world is modified even when its startup went unwatched, and the log says
+  *which* — and the page says so plainly when it knows the first and not the
+  second.
+- A preset is logged as itself and is **not** expanded into the individual
+  settings, so a world reports whichever its operator used.
+- Modifiers are logged once per run, so the newest start wins and an older
+  one is history. A modifier Skald has never heard of still shows, with a
+  tidied-up label.
+- New `/api/world`: per world, its modifiers, preset, game version and
+  whether the server calls it modified.
+
 ## 0.4.1
 
 - **Wind direction was backwards.** Skald showed the direction the wind came
