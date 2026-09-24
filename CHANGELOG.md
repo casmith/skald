@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+## 0.4.0
+
+- **Your own page.** `/me` grew from a list of characters into your numbers:
+  hours over 24 hours, 7 days, 30 days and all time, deaths and deaths per
+  10 hours played, your longest session, when you were first seen, where you
+  stand among everyone on the server, your hours and deaths per day, and
+  your last few sessions.
+- It is the dashboard's own `playtime`, `daily` and `recent` narrowed to
+  your characters, not a second set of arithmetic — so there is one
+  definition of an hour played and your page cannot drift from the table you
+  appear in.
+- Your other characters get a line rather than being folded into the
+  headline, since the numbers people mean are their primary's.
+- Still nothing new on the public page, and still no Steam IDs anywhere.
+
 ## 0.3.0
 
 - **Your characters, worked out rather than claimed.** A Valheim log names

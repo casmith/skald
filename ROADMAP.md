@@ -57,7 +57,8 @@ adds personal features. Nothing changes for people who do not.
       connection's SteamID with the character on it, so `/me` offers only
       the characters that account has played, and the most-played one is the
       primary unless you choose otherwise (0.3.0)
-- [ ] A personal view: your playtime, your deaths, your sessions
+- [x] A personal view: your playtime, your deaths, your sessions, and where
+      you stand among everyone (0.4.0)
 - [ ] Steam Web API key (optional) for display name and avatar
 
 ## M4 — The map

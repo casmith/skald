@@ -79,6 +79,17 @@ in as anyone.
 
 Nothing about the dashboard changes for people who do not sign in.
 
+### Your page
+
+`/me` is the one page that is yours. It shows your playtime over the usual
+windows, your deaths and deaths per 10 hours played, your longest session,
+where you stand among everyone on the server, your hours and deaths per day,
+and your last few sessions — all for your primary character, with a line for
+anything you have played as your others.
+
+It is the dashboard's own numbers narrowed to you, not a second calculation,
+so the two always agree.
+
 ### Your characters
 
 A Valheim player can have several characters, and a server log names the
@@ -111,7 +122,7 @@ forgot.
 | Path | What |
 |---|---|
 | `/` | The dashboard. `?world=Utgard` picks a world; tabs are plain links |
-| `/me` | Your characters, and which one is your primary. Signed in only |
+| `/me` | Your numbers, your characters and your last few sessions. Signed in only |
 | `/diagnostics` | What Skald can see, and what it cannot |
 | `/api/online` | Who is on each world now |
 | `/api/playtime` | Hours and deaths per player, per window |
