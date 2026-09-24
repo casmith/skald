@@ -74,6 +74,15 @@ def sessions(rng, world, now, days=30):
                              "duration 3.2 ms")
             lines.append(f"{stamp(start + length)}: Closing socket {steam}")
 
+    # How the world is set up, logged once at startup exactly as a real
+    # server writes it. Midgard runs a couple of things off the defaults;
+    # Utgard is vanilla, so it logs nothing at all.
+    if world == "Midgard":
+        boot = now - days * 86400 - 600
+        for key, value in (("combat", "hard"), ("deathpenalty", "casual"),
+                           ("resources", "more"), ("raids", "less")):
+            lines.append(f"{stamp(boot)}: Setting world modifier: {key}->{value}")
+
     # A boss falling, with the summon before it, so the dashboard shows a
     # kill timed to the second and how long the fight took.
     if world == "Midgard":
