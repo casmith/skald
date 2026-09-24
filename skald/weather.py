@@ -112,7 +112,16 @@ def weather_at(period, table):
 
 
 def wind_at(time):
-    """Global wind at a world time: (direction it blows toward, strength)."""
+    """Global wind at a world time: (bearing, strength).
+
+    The bearing is the game's own: the direction the wind blows *toward*,
+    which is what a ship's wind indicator points at and which way the smoke
+    and the grass lean. Skald used to turn it around and present it the
+    meteorological way, as the direction the wind comes *from* -- correct
+    for a weather forecast, and exactly backwards from what a player sees
+    standing in it. The number here is the reference implementation's, and
+    the page now shows it unturned.
+    """
     angle, intensity = 0.0, 0.5
     for octave in (1, 2, 4, 8):
         rng = Rng(int(time // (WIND_PERIOD * 8 / octave)))
@@ -173,7 +182,7 @@ def forecast(time, days=7):
         day, clock = day_and_clock(at)
         row = {"period": p, "world_time": round(at, 1), "day": day,
                "clock": clock, "now": p == period, "phase": phase_at(at)[0],
-               "wind_from": compass(angle + 180),
+               "wind_dir": compass(angle),
                "wind": round(intensity, 2), "biomes": {}}
         for biome in BIOMES:
             name = weather_at(p, BIOMES[biome])
@@ -205,6 +214,6 @@ def report(time):
         "next_phase_at": next_phase_at, "next_phase_in": next_phase_in,
         "period": period,
         "changes_in": round((period + 1) * WEATHER_PERIOD - time),
-        "wind_from": compass(angle + 180), "wind_angle": round(angle, 1),
+        "wind_dir": compass(angle), "wind_angle": round(angle, 1),
         "biomes": biomes,
     }

@@ -70,3 +70,30 @@ def test_the_forecast_starts_where_the_world_is_now():
     """The current period is reported from now, not from when it began."""
     t = 3 * weather.WEATHER_PERIOD + 100
     assert weather.forecast(t, days=1)[0]["world_time"] == t
+
+
+def test_the_wind_blows_the_way_the_game_says_it_does():
+    """Skald used to turn the bearing around and show where the wind came
+    *from* -- correct for a forecast, and exactly backwards from what a
+    player standing in it sees. The reference angle is the game's own, and
+    the page shows it unturned."""
+    for v in VECTORS:
+        report = weather.report(v["time"])
+        assert report["wind_dir"] == weather.compass(v["wind_angle"])
+        assert report["wind_dir"] != weather.compass(v["wind_angle"] + 180)
+
+
+def test_the_forecast_agrees_with_the_report():
+    """Two code paths compute the same bearing; they must not drift apart."""
+    at = 250_000
+    report = weather.report(at)
+    first = weather.forecast(at, days=1)[0]
+    assert first["wind_dir"] == report["wind_dir"]
+
+
+def test_the_compass_boxes_are_where_they_should_be():
+    # The boxes are 45 degrees wide and centred on their point, so they
+    # break at 22.5, not at 45.
+    for angle, want in [(0, "N"), (22, "N"), (23, "NE"), (90, "E"), (180, "S"),
+                        (-90, "W"), (-180, "S"), (359, "N")]:
+        assert weather.compass(angle) == want

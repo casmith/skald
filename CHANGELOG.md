@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+## 0.4.1
+
+- **Wind direction was backwards.** Skald showed the direction the wind came
+  *from* — the meteorological convention, right for a forecast and exactly
+  opposite to what a player standing in it sees. Valheim's own bearing, the
+  one a ship's wind indicator points along, is the direction it blows
+  *toward*. The arrow and the compass letter now match the game. Reported
+  from a live server, where the page said NE and the wind was blowing SW.
+- The weather engine was never wrong: the angle always matched the reference
+  implementation's vectors. Only the page turned it around. The regression
+  test now pins the displayed bearing to that angle, so the two cannot part
+  again.
+- **API change:** `wind_from` is now `wind_dir` in `/api/weather`, because
+  the old name described the old, wrong reading.
+
 ## 0.4.0
 
 - **Your own page.** `/me` grew from a list of characters into your numbers:
