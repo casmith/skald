@@ -8,7 +8,7 @@ It reads what the server already writes — its log and its world saves — and
 serves a single page. No mods, no plugins, nothing installed in the game, and
 nothing written back to your world.
 
-> **v0.4** — the first release worth sharing, and then some. Running daily on the homelab it
+> **v0.5** — the first release worth sharing, and then some. Running daily on the homelab it
 > grew up in, and installed from scratch on a clean machine to make sure the
 > instructions below are true. See the [roadmap](ROADMAP.md) for what is next
 > and the [limitations](docs/limitations.md) for what it cannot do.
@@ -61,6 +61,8 @@ server](#trying-it-without-a-server).)*
   what is ahead.
 - **In-game weather** for each biome you have reached, the day/night phase,
   and a 7-day forecast.
+- **How the world is set up** — combat, death penalty, resources, raids and
+  portals, or the preset the server was started with.
 - **Charts** of player-hours, deaths and exploration per day.
 - **Optional sign-in through Steam**, which works out which characters are
   yours, greets you by the one you play most, and gives you a page of your

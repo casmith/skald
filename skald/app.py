@@ -177,7 +177,33 @@ EVENT_RES = [
     ("location", re.compile(r"Placed location (\S+) in zone (-?\d+),(-?\d+)"), 3),
     ("globalkey", re.compile(r"Setting global key (\S+)"), 3),
     ("bossspawn", re.compile(r"Spawning boss at"), 3),
+    # World modifiers, logged once at startup and nowhere else. A preset is
+    # logged as itself and does *not* expand into the individual settings,
+    # so both shapes have to be kept.
+    ("modifier", re.compile(r"Setting world modifier: (\w+)->(\w+)"), 3),
+    ("preset", re.compile(r"Setting world modifier preset: (\w+)"), 3),
 ]
+
+# What the game calls each setting, and each of its values, in words. A name
+# missing from here still shows, tidied up: Valheim can add a modifier
+# without telling us, and a blank is worse than an unstyled label.
+# `m=` is last in the Steam tags and its own commas are backslash-escaped,
+# so everything after it is its value.
+MODIFIER_TAG_RE = re.compile(r"(?:^|,)m=(.*)$")
+
+# Also the order they are shown in: the game logs them in whatever order it
+# happens to hold them, which is neither stable nor meaningful.
+MODIFIER_LABELS = {
+    "combat": "Combat", "deathpenalty": "Death penalty", "resources": "Resources",
+    "raids": "Raids", "portals": "Portals",
+}
+MODIFIER_ORDER = list(MODIFIER_LABELS)
+MODIFIER_VALUES = {
+    "veryeasy": "very easy", "easy": "easy", "normal": "normal", "hard": "hard",
+    "veryhard": "very hard", "casual": "casual", "hardcore": "hardcore",
+    "muchless": "much less", "less": "less", "more": "more",
+    "muchmore": "much more", "none": "none", "immersive": "immersive",
+}
 
 LOCK = threading.Lock()
 # World -> latest poll result: {"up", "count", "status_ts", "error"}.
@@ -361,6 +387,10 @@ def replay_world(world, evs, out):
                 out["keys"].append({"world": world, "key": key, "ts": ts})
         elif kind == "bossspawn":
             out["spawns"].append({"world": world, "ts": ts})
+        elif kind in ("modifier", "preset"):
+            out["modifiers"].append({"world": world, "ts": ts, "kind": kind,
+                                     "key": args[0],
+                                     "value": args[1] if kind == "modifier" else ""})
         elif kind == "location":
             # Several locations can land in one zone; count the zone once.
             zone = f"{args[1]},{args[2]}"
@@ -383,11 +413,13 @@ def build_history():
       keys      [{world, key, ts}], milestone keys the server logged setting
       spawns    [{world, ts}], boss summons
     """
-    out = {"sessions": [], "deaths": [], "explored": [], "keys": [], "spawns": []}
+    out = {"sessions": [], "deaths": [], "explored": [], "keys": [], "spawns": [],
+           "modifiers": []}
     for world, evs in load_events().items():
         replay_world(world, evs, out)
     sessions, deaths, explored = out["sessions"], out["deaths"], out["explored"]
     keys, spawns = out["keys"], out["spawns"]
+    out["modifiers"].sort(key=lambda m: m["ts"])
     for s in sessions:
         s.pop("seen_leave", None)  # internal bookkeeping, not part of the API
     sessions.sort(key=lambda s: s["start"])
@@ -396,7 +428,7 @@ def build_history():
     keys.sort(key=lambda k: k["ts"])
     spawns.sort(key=lambda k: k["ts"])
     return {"sessions": sessions, "deaths": deaths, "explored": explored,
-            "keys": keys, "spawns": spawns}
+            "keys": keys, "spawns": spawns, "modifiers": out["modifiers"]}
 
 
 _CACHE = {"sig": None, "history": None}
@@ -424,15 +456,26 @@ def poll_once():
         if s["end"] is None:
             open_by_world.setdefault(s["world"], []).append(s)
     for world, url in SERVERS.items():
-        st = {"up": False, "count": None, "status_ts": None, "error": None}
+        st = {"up": False, "count": None, "status_ts": None, "error": None,
+              "modified": None}  # None: we have not heard from this world
         try:
             with urllib.request.urlopen(url, timeout=5) as r:
                 data = json.load(r)
             st["status_ts"] = datetime.fromisoformat(
                 data["last_status_update"]).timestamp()
             st["error"] = data.get("error")
-            found = GAME_VERSION_RE.search(data.get("keywords") or "")
+            keywords = data.get("keywords") or ""
+            found = GAME_VERSION_RE.search(keywords)
             st["game_version"] = found.group(1) if found else None
+            # The server advertises its world modifiers as `m=`, last in the
+            # tags: empty at the defaults, and otherwise a list of numeric
+            # effect ids. Those ids are undocumented, built at runtime and
+            # free to be renumbered by any update, so Skald reads this as a
+            # yes/no and takes the words themselves from the log. Between
+            # them: this says *whether* a world is modified even when its
+            # startup went unwatched, and the log says *which*.
+            mods = MODIFIER_TAG_RE.search(keywords)
+            st["modified"] = bool(mods and mods.group(1).strip())
             # The updater keeps rewriting status.json while the game is down,
             # with `error` set -- so a fresh file is not by itself "up".
             fresh = time.time() - st["status_ts"] < 300
@@ -1067,6 +1110,11 @@ def bar_chart(title, rows, key, tip, note=""):
             f'last {len(rows)} days">{"".join(parts)}</svg></figure>')
 
 
+def status_of(world):
+    with LOCK:
+        return dict(STATUS.get(world) or {}) or None
+
+
 def worlds_of(h):
     """Tab order: TRACKER_SERVERS order (the default world first), then any
     world seen only in the logs."""
@@ -1090,10 +1138,51 @@ def pick_world(h, requested):
     return None
 
 
+# Modifier lines all land in the same second at startup, so anything set
+# more than a minute apart belongs to a different run of the server.
+MODIFIER_RUN_GAP = 60
+
+
+def world_settings(h, world):
+    """How this world is set up, as of the last server start Skald saw.
+
+    Modifiers are logged once, at startup, and never again -- so the newest
+    run's lines are the current truth and older ones are history. A preset
+    is logged as itself rather than expanded, so a world can report either
+    a preset or a list of settings, and (if someone passes both) both.
+    """
+    lines = [m for m in h["modifiers"] if m["world"] == world]
+    if not lines:
+        return None
+    run = [lines[-1]]
+    for m in reversed(lines[:-1]):
+        if run[-1]["ts"] - m["ts"] > MODIFIER_RUN_GAP:
+            break
+        run.append(m)
+    run.reverse()
+    preset = next((m["key"] for m in run if m["kind"] == "preset"), None)
+    seen, mods = set(), []
+    for m in run:
+        if m["kind"] != "modifier" or m["key"] in seen:
+            continue
+        seen.add(m["key"])
+        mods.append({"setting": m["key"], "value": m["value"],
+                     "setting_label": MODIFIER_LABELS.get(
+                         m["key"], m["key"].replace("_", " ").capitalize()),
+                     "value_label": MODIFIER_VALUES.get(
+                         m["value"], m["value"].replace("_", " "))})
+    mods.sort(key=lambda m: (MODIFIER_ORDER.index(m["setting"])
+                             if m["setting"] in MODIFIER_ORDER
+                             else len(MODIFIER_ORDER), m["setting"]))
+    return {"world": world, "since": run[0]["ts"], "preset": preset,
+            "modifiers": mods}
+
+
 def for_world(h, world):
     """History narrowed to one world, in the same shape as history()."""
     return {k: [x for x in h[k] if x["world"] == world]
-            for k in ("sessions", "deaths", "explored", "keys", "spawns")}
+            for k in ("sessions", "deaths", "explored", "keys", "spawns",
+                      "modifiers")}
 
 
 def for_players(h, names):
@@ -1106,7 +1195,7 @@ def for_players(h, names):
     names = set(names)
     return {"sessions": [x for x in h["sessions"] if x["player"] in names],
             "deaths": [x for x in h["deaths"] if x["player"] in names],
-            "explored": [], "keys": [], "spawns": []}
+            "explored": [], "keys": [], "spawns": [], "modifiers": []}
 
 
 def me_stats(h, now, names, primary):
@@ -1152,6 +1241,37 @@ def me_stats(h, now, names, primary):
         "days": daily(for_players(h, [primary]), now, CHART_DAYS),
         "recent": recent(for_players(h, [primary]), now, 10),
     }
+
+
+def render_world_settings(settings, status):
+    """How this world is set up, in one line -- or an honest blank.
+
+    Three states worth telling apart: settings we have read from the log,
+    a world the server says is modified whose startup we did not see, and
+    a world running the defaults.
+    """
+    pills = []
+    if settings:
+        if settings["preset"]:
+            name = settings["preset"]
+            pills.append('<span class="pill preset">'
+                         f'{html.escape(MODIFIER_VALUES.get(name, name)).capitalize()}'
+                         " preset</span>")
+        for m in settings["modifiers"]:
+            pills.append(f'<span class="pill">{html.escape(m["setting_label"])}'
+                         f' <b>{html.escape(m["value_label"])}</b></span>')
+    if pills:
+        return f'<div class="settings">{"".join(pills)}</div>'
+    modified = (status or {}).get("modified")
+    if modified:
+        # The server says so but we have never seen it say what: the lines
+        # are written once, at startup, and we were not watching then.
+        return ('<div class="settings"><span class="pill unknown">Modified</span>'
+                '<span class="muted">non-default settings; Skald reads which ones'
+                ' the next time this server starts</span></div>')
+    if modified is False:
+        return '<div class="settings"><span class="pill">Default settings</span></div>'
+    return ""
 
 
 def render(h, now, world, user=None):
@@ -1354,6 +1474,8 @@ def render(h, now, world, user=None):
             .replace("__TITLE__", html.escape(world))
             .replace("__TABS__", "".join(tabs))
             .replace("__CARD__", card)
+            .replace("__WORLD__", render_world_settings(
+                world_settings(h, world), status.get(world)))
             .replace("__WEATHER__", weather_card)
             .replace("__TROPHIES__", f'<div class="trophies">{"".join(badges)}</div>')
             .replace("__MILESTONES__", "\n".join(ms_rows) or empty(3))
@@ -1398,6 +1520,14 @@ PAGE = """<!doctype html>
  h3{font:600 .95rem var(--display);margin:0 0 .4rem;display:flex;justify-content:space-between;gap:1rem;
   color:var(--gold-dim);letter-spacing:.03em}
  h3.world{margin:1rem 0 .5rem;font-size:.85rem;color:var(--muted)}
+ /* How the world is set up: one quiet line of pills under the card. */
+ .settings{display:flex;flex-wrap:wrap;align-items:center;gap:.4rem;margin:.6rem 0 0;
+  font-size:.8rem;color:var(--muted)}
+ .pill{border:1px solid var(--line);border-radius:999px;padding:.1rem .6rem;
+  background:var(--panel);color:var(--muted)}
+ .pill b{color:var(--gold-dim);font-weight:400}
+ .pill.preset{border-color:var(--bronze);color:var(--gold-dim)}
+ .pill.unknown{border-color:var(--bronze);color:var(--gold-dim)}
  .meta,.muted{color:var(--muted)} .meta{text-align:center;font-size:.85rem;margin-bottom:1.5rem}
  /* Sign-in: one line of chrome, and only when it is configured. */
  .who{display:flex;justify-content:center;align-items:center;gap:.6rem;margin:-1rem 0 1.2rem;
@@ -1531,6 +1661,7 @@ PAGE = """<!doctype html>
 __WHO__
 <nav class="tabs" aria-label="Worlds">__TABS__</nav>
 __CARD__
+__WORLD__
 __WEATHER__
 <h2>Bosses slain</h2>
 __TROPHIES__
@@ -2126,6 +2257,13 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"worlds": [r for w in worlds_of(h)
                                    if (not requested or w == world)
                                    and (r := weather_report(h, w, now))]})
+        elif path == "/api/world":
+            self._json({"worlds": [
+                {"world": w, "modified": (status_of(w) or {}).get("modified"),
+                 "game_version": (status_of(w) or {}).get("game_version"),
+                 **(world_settings(h, w) or {"preset": None, "modifiers": [],
+                                             "since": None})}
+                for w in worlds_of(h) if not requested or w == world]})
         elif path == "/api/milestones":
             self._json({"milestones": [m for m in milestones(h)
                                        if not requested or m["world"] == world]})
