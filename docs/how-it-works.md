@@ -138,6 +138,10 @@ These are written **once, at startup, and never again**. A server already
 running when Skald starts watching will not repeat them; they arrive on its
 next restart, and Skald keeps them from then on.
 
+Keep that log wherever you like, including the volume the hook already
+writes to — Skald will not also read it as a hook file, which would count
+every line of server chatter against the signal below.
+
 **The Steam tags say whether.** The server advertises its modifiers in the
 `m=` field of the tags Skald already polls every minute:
 
