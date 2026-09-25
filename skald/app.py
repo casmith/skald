@@ -255,7 +255,19 @@ def apply_config(cfg):
 
 
 def event_paths():
-    return sorted(glob.glob(os.path.join(EVENTS_DIR, "*.log")))
+    """The hook's files -- never a file already named as a world's log.
+
+    A server log written *into* the events directory (which is the sensible
+    place for it: that volume is already shared and already survives a
+    container being recreated) matches this glob too. Reading it here as
+    well would be harmless for the data, since ingestion is keyed by the
+    line's own text -- but it would count every line of ordinary server
+    chatter as one Skald failed to recognise, and that number is the whole
+    "an update reworded something" signal on /diagnostics.
+    """
+    named = {os.path.abspath(p) for p in CONFIG.log_files().values()}
+    return sorted(p for p in glob.glob(os.path.join(EVENTS_DIR, "*.log"))
+                  if os.path.abspath(p) not in named)
 
 
 def db():
@@ -313,6 +325,11 @@ def ingest_events():
         # A server's whole log is mostly lines Skald does not care about,
         # so counting the misses there would say nothing.
         added += store.ingest(db(), path, world, parse_any)
+    # A file that used to be read as a hook file and is now named as a
+    # server log carries a count of "unrecognised" lines that never meant
+    # anything. Clear it rather than leave the number wrong for ever.
+    store.clear_skipped(db(), [os.path.abspath(p) for p in CONFIG.log_files().values()]
+                        + list(CONFIG.log_files().values()))
     if added:
         # Whoever ingested, the replay is now out of date. Invalidating here
         # rather than in history() means it cannot matter who called first.
@@ -1475,7 +1492,7 @@ def render(h, now, world, user=None):
             .replace("__TABS__", "".join(tabs))
             .replace("__CARD__", card)
             .replace("__WORLD__", render_world_settings(
-                world_settings(h, world), status.get(world)))
+                world_settings(h, world), status_of(world)))
             .replace("__WEATHER__", weather_card)
             .replace("__TROPHIES__", f'<div class="trophies">{"".join(badges)}</div>')
             .replace("__MILESTONES__", "\n".join(ms_rows) or empty(3))

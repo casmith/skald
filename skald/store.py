@@ -217,6 +217,21 @@ def skipped_lines(conn):
             conn.execute("SELECT path, skipped FROM files WHERE skipped > 0")}
 
 
+def clear_skipped(conn, paths):
+    """Forget the unrecognised-line count for these files.
+
+    Only called for files that are now read as whole server logs, where the
+    count was never meaningful. Cheap and idempotent: the WHERE clause makes
+    it a no-op once it has run.
+    """
+    if not paths:
+        return
+    marks = ",".join("?" * len(paths))
+    with conn:
+        conn.execute(f"UPDATE files SET skipped = 0 WHERE skipped > 0"
+                     f" AND path IN ({marks})", list(paths))
+
+
 def state(conn):
     """Milestone and save state, in the shape the rest of the code expects."""
     out = {}
