@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+## 0.5.1
+
+- **A server log kept in the events directory was read twice.** That is the
+  sensible place for it — the volume is already shared with the game and
+  already survives a container being recreated — but the file matches the
+  glob that finds the hook's files, so it was read as a whole server log
+  *and* as a hook file. The data was unharmed (ingestion is keyed by the
+  line's own text), but every line of ordinary server chatter counted as one
+  Skald had failed to recognise, and that number is the entire "an update
+  reworded something" signal on `/diagnostics`. A file named as a world's
+  `log_file` is no longer picked up as a hook file, and a count left behind
+  by an older version is cleared.
+- **"Default settings" and "Modified" never appeared on the page.** The
+  dashboard was reading the summary built for the online list, which does
+  not carry whether the server calls the world modified. Worlds with
+  modifiers in the log were unaffected; worlds relying on the Steam tag
+  showed nothing at all.
+
 ## 0.5.0
 
 - **How the world is set up**, under the tabs: combat, death penalty,
