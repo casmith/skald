@@ -63,9 +63,10 @@ adds personal features. Nothing changes for people who do not.
 
 ## M4 — The map
 
-- [ ] Upload a character file; keep only the fog of war and the map pins and
-      discard the rest
-- [ ] Merge everyone's exploration into one map of what the group has seen
+- [x] Upload a character file; keep only the fog of war and the map pins and
+      discard the rest — structurally, since the map is read before the
+      player and the parser stops there
+- [x] Merge everyone's exploration into one map of what the group has seen
 - [ ] Maybe: render terrain from the world seed, so the fog sits on a real map
 
 ## M5 — Later

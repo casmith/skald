@@ -47,6 +47,7 @@ import json
 import os
 import re
 import struct
+import zlib
 import sys
 import threading
 import time
@@ -57,6 +58,7 @@ import zipfile
 from skald import __version__
 from skald import auth
 from skald import config as configuration
+from skald import fch
 from skald import store
 from skald import weather
 from datetime import datetime, timedelta, UTC
@@ -1132,6 +1134,50 @@ def status_of(world):
         return dict(STATUS.get(world) or {}) or None
 
 
+MAX_UPLOAD = 64 * 1024 * 1024      # several worlds at 2048 square, and no more
+_UID_CACHE = {}
+
+
+def world_names_by_uid():
+    """uid -> world name, read from each world's .fwl beside its save.
+
+    A character file knows worlds by uid; Skald knows them by name. The
+    metadata file next to the save is where the two meet. Best effort: an
+    unreadable one just means a map listed by number.
+    """
+    out = {}
+    for name in sorted(SERVERS):
+        pattern = os.path.join(SAVES_ROOT, name, "worlds_local", f"{name}.fwl")
+        try:
+            st = os.stat(pattern)
+            cached = _UID_CACHE.get(pattern)
+            if cached and cached[0] == st.st_mtime:
+                out[cached[1]] = name
+                continue
+            with open(pattern, "rb") as f:
+                uid, _ = fch.world_uid(f.read())
+            _UID_CACHE[pattern] = (st.st_mtime, uid)
+            out[uid] = name
+        except (OSError, fch.Bad, struct.error):
+            continue
+    return out
+
+
+def merged_map(world_uid):
+    """Everyone's exploration of one world, added together."""
+    rows = store.maps_for(db(), world_uid)
+    if not rows:
+        return None
+    edge = max(r["edge"] for r in rows)
+    bits, pins, people = b"", [], []
+    for r in rows:
+        bits = fch.merge(bits, zlib.decompress(r["explored"]))
+        pins.extend(json.loads(r["pins"]))
+        people.append(r["steam_id"])
+    return {"edge": edge, "bits": bits, "pins": pins, "people": len(people),
+            "seen": sum(bin(b).count("1") for b in bits)}
+
+
 def worlds_of(h):
     """Tab order: TRACKER_SERVERS order (the default world first), then any
     world seen only in the logs."""
@@ -1827,7 +1873,8 @@ def yes_no(ok, good="yes", bad="no"):
     return f'<span class="{cls}">{good if ok else bad}</span>'
 
 
-def render_me(user, chars, rows_db, stats=None):
+def render_me(user, chars, rows_db, stats=None, maps=(), world_names=None,
+              note=""):
     """Your page: your numbers, your characters, your last few evenings."""
     state = {r["name"]: r for r in rows_db}
     primary = next((r["name"] for r in rows_db if r["is_primary"]), None)
@@ -1877,7 +1924,36 @@ def render_me(user, chars, rows_db, stats=None):
             .replace("__STATS__", render_my_stats(stats))
             .replace("__BODY__", body)
             .replace("__LEAD__", f'<p class="note">{lead}</p>' if lead else "")
-            .replace("__SESSIONS__", render_my_sessions(stats)))
+            .replace("__SESSIONS__", render_my_sessions(stats))
+            .replace("__MAPS__", render_my_maps(maps, world_names or {}, note)))
+
+
+def render_my_maps(maps, world_names, note=""):
+    """Upload a character file; keep the map, discard the character."""
+    rows = "".join(
+        f'<tr><td><b>{html.escape(world_names.get(m["world_uid"], str(m["world_uid"])))}'
+        f'</b></td><td>{m["seen"] / (m["edge"] ** 2) * 100:.1f}% seen</td>'
+        f'<td>{t(m["uploaded"])}</td><td class="act">'
+        f'<form method="post" action="/me/map/drop">'
+        f'<input type="hidden" name="world" value="{m["world_uid"]}">'
+        f'<button type="submit">remove</button></form></td></tr>'
+        for m in maps)
+    table = ('<div class="wrap"><table><thead><tr><th>World</th><th>Explored</th>'
+             '<th>Uploaded</th><th></th></tr></thead><tbody>'
+             f'{rows}</tbody></table></div>' if rows else "")
+    said = f'<p class="facts">{html.escape(note)}</p>' if note else ""
+    return ('<h2>Your map</h2>' + said + table
+            + '<form method="post" action="/me/map" enctype="multipart/form-data" '
+              'class="notify"><input type="file" name="character" accept=".fch" '
+              'required><button type="submit">upload</button></form>'
+            '<p class="note">Your character file, from '
+            '<span class="mono">AppData/LocalLow/IronGate/Valheim/characters</span> '
+            'on Windows or <span class="mono">~/.config/unity3d/IronGate/Valheim/'
+            'characters</span> on Linux. Skald reads the header and the map and '
+            '<b>stops</b>: your inventory, skills, appearance and journal sit after '
+            'the part it parses and are never decoded, so there is nothing else for '
+            'it to keep. What it does keep &mdash; where you have been, and your '
+            'pins &mdash; is merged into <a href="/map">the group map</a>.</p>')
 
 
 def ordinal(n):
@@ -1989,6 +2065,9 @@ ME_PAGE = """<!doctype html>
   color:var(--muted)}
  tr.off td{opacity:.45}
  p.note{color:var(--muted);font-size:.85rem}
+ .mono{font-family:ui-monospace,monospace;font-size:.8rem}
+ .notify{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem;margin:.4rem 0}
+ .notify input[type=file]{font:inherit;font-size:.82rem;color:var(--muted)}
  h2{font:600 1.05rem 'Cinzel',Georgia,serif;color:var(--gold);letter-spacing:.05em;
   margin:2rem 0 .7rem;display:flex;align-items:center;gap:.7rem}
  h2::after{content:"";flex:1;height:1px;background:linear-gradient(90deg,var(--bronze),transparent)}
@@ -2020,6 +2099,7 @@ __STATS__
 __BODY__
 __LEAD__
 __SESSIONS__
+__MAPS__
 <p class="note">Only characters this Steam account has been seen playing are listed &mdash; Skald
  reads that pairing from the server&rsquo;s own log, so there is nothing to type in, nothing to
  prove, and no way to take a character you have not played. None of it is public: your
@@ -2029,6 +2109,69 @@ __SESSIONS__
  for(const el of document.querySelectorAll('time[data-ts]'))
   el.textContent=f.format(new Date(el.dataset.ts*1000));
 </script>
+</body></html>"""
+
+
+def render_map(names, mapped, requested):
+    """The group's map: everyone's fog of war, added together."""
+    rows = sorted(mapped, key=lambda m: -m["newest"])
+    if not rows:
+        return MAP_PAGE.replace("__TABS__", "").replace("__BODY__",
+            '<p class="empty">Nobody has uploaded a character yet. Sign in, open '
+            '<a href="/me">your page</a>, and add the character file for a world '
+            'you have explored.</p>')
+    pick = next((m for m in rows if str(m["world_uid"]) == requested), rows[0])
+    tabs = "".join(
+        f'<a class="tab{" on" if m is pick else ""}"'
+        f' href="/map?world={m["world_uid"]}">'
+        f'{html.escape(names.get(m["world_uid"], str(m["world_uid"])))}'
+        f' <span class="n">{m["people"]}</span></a>'
+        for m in rows)
+    merged = merged_map(pick["world_uid"])
+    share = merged["seen"] / (merged["edge"] ** 2) * 100 if merged else 0
+    name = html.escape(names.get(pick["world_uid"], str(pick["world_uid"])))
+    body = (f'<p class="facts"><b>{name}</b> &middot; '
+            f'{merged["people"]} character{"" if merged["people"] == 1 else "s"} '
+            f'merged &middot; {share:.1f}% of the map seen &middot; '
+            f'{len(merged["pins"])} pins</p>'
+            f'<img class="map" src="/map.png?world={pick["world_uid"]}" '
+            f'alt="Explored map of {name}" width="{merged["edge"]}" '
+            f'height="{merged["edge"]}">')
+    return MAP_PAGE.replace("__TABS__", tabs).replace("__BODY__", body)
+
+
+MAP_PAGE = """<!doctype html>
+<html><head><meta charset="utf-8"><title>Map &middot; Skald</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Averia+Serif+Libre:wght@400;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700&display=swap" rel="stylesheet">
+<style>
+ :root{color-scheme:dark;--bg:#0e0b08;--panel:#1c1610;--line:#3b2e20;--bronze:#8a6a3f;
+  --gold:#e8b25a;--gold-dim:#cfa266;--fg:#eadcc0;--muted:#a8977a}
+ body{font:15px/1.5 'Averia Serif Libre',Georgia,serif;margin:0 auto;max-width:62rem;
+  padding:1.75rem 1rem 3rem;color:var(--fg);background:var(--bg)}
+ h1{font:700 1.6rem 'Cinzel',Georgia,serif;color:var(--gold);letter-spacing:.06em;margin:0 0 .2rem}
+ a{color:var(--gold)} .muted,.facts{color:var(--muted)} .facts{font-size:.85rem;margin:.4rem 0 .8rem}
+ .facts b{color:var(--gold-dim);font-weight:400}
+ .tabs{display:flex;flex-wrap:wrap;gap:.4rem;margin:.8rem 0}
+ .tab{border:1px solid var(--line);border-radius:3px;padding:.2rem .7rem;text-decoration:none;
+  font-size:.85rem;color:var(--muted);background:var(--panel)}
+ .tab.on{border-color:var(--bronze);color:var(--gold)}
+ .tab .n{color:var(--muted);font-size:.75rem}
+ .map{display:block;width:100%;height:auto;image-rendering:pixelated;
+  border:1px solid var(--line);border-radius:3px;background:var(--panel)}
+ .empty{background:var(--panel);border:1px solid var(--line);border-radius:3px;
+  padding:.9rem 1rem;color:var(--muted)}
+</style></head><body>
+<h1>The map</h1>
+<p class="muted">Everyone's fog of war, added together &middot;
+ <a href="/">back to the dashboard</a> &middot; <a href="/me">add yours</a></p>
+<nav class="tabs">__TABS__</nav>
+__BODY__
+<p class="muted" style="font-size:.85rem">Only the explored mask and the pins are kept
+ from an uploaded character. Nothing else in the file is parsed, so there is nothing
+ else to store: no inventory, no skills, no name.</p>
 </body></html>"""
 
 
@@ -2207,9 +2350,67 @@ class Handler(BaseHTTPRequestHandler):
             if token:
                 store.end_session(db(), auth.token_hash(token))
             return self._redirect("/", auth.clear_cookie_header(CONFIG.secure_cookies))
+        if path in ("/me/map", "/me/map/drop"):
+            return self._map_post(path)
         if path in ("/me/primary", "/me/hide", "/me/mine"):
             return self._me_post(path)
         self._send(404, "not found", "text/plain")
+
+    def _upload(self):
+        """The one file out of a multipart body. Bounded before it is read.
+
+        A hand-rolled parser because the standard library no longer ships
+        one: `cgi` was removed in 3.13. It wants only a single part, so it
+        does the least that can be correct -- find the boundary, take the
+        bytes between the first part's blank line and the next boundary.
+        """
+        ctype = self.headers.get("Content-Type", "")
+        if "multipart/form-data" not in ctype or "boundary=" not in ctype:
+            raise fch.Bad("that was not a file upload")
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            raise fch.Bad("no length") from None
+        if length <= 0 or length > MAX_UPLOAD:
+            raise fch.Bad(f"a character file should be under "
+                          f"{MAX_UPLOAD // (1024 * 1024)} MB")
+        boundary = ctype.split("boundary=", 1)[1].strip().strip('"').encode()
+        body = self.rfile.read(length)
+        parts = body.split(b"--" + boundary)
+        for part in parts:
+            head, _, rest = part.partition(b"\r\n\r\n")
+            if b'filename="' in head and rest:
+                return rest.rsplit(b"\r\n", 1)[0]
+        raise fch.Bad("no file was attached")
+
+    def _map_post(self, path):
+        user = current_user(self.headers)
+        if not user:
+            return self._send(403, "sign in first", "text/plain")
+        conn, steam_id = db(), user["steam_id"]
+        if path == "/me/map/drop":
+            uid = self._form().get("world", "")
+            if uid.lstrip("-").isdigit():
+                store.drop_map(conn, steam_id, int(uid))
+            return self._redirect("/me")
+        try:
+            blob = self._upload()
+            got = fch.parse(blob)
+        except fch.Bad as e:
+            return self._redirect("/me?map=" + urllib.parse.quote(str(e)))
+        except Exception:
+            return self._redirect("/me?map=" + urllib.parse.quote(
+                "that file could not be read as a character file"))
+        now = time.time()
+        for w in got["worlds"]:
+            packed = fch.pack(w["explored"])
+            store.put_map(conn, steam_id, w["uid"], w["edge"],
+                          zlib.compress(packed, 9), w["pins"],
+                          sum(bin(b).count("1") for b in packed), now)
+        n = len(got["worlds"])
+        return self._redirect("/me?map=" + urllib.parse.quote(
+            f"{n} world{'' if n == 1 else 's'} taken from that character"
+            if n else "that character has not explored anywhere yet"))
 
     def _me_post(self, path):
         user = current_user(self.headers)
@@ -2246,6 +2447,27 @@ class Handler(BaseHTTPRequestHandler):
         def arg(name, default):
             v = params.get(name, [""])[0]
             return int(v) if v.isdigit() else default
+
+        # Before the tab handling below: on these two, ?world= is a world's
+        # uid from a character file, not one of Skald's world names, and
+        # pick_world would turn it into a 404.
+        if path == "/map.png":
+            uid = params.get("world", [""])[0]
+            merged = merged_map(int(uid)) if uid.lstrip("-").isdigit() else None
+            if not merged:
+                return self._send(404, "no map for that world", "text/plain")
+            body = fch.png(merged["bits"], merged["edge"])
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-cache")
+            self.end_headers()
+            return self.wfile.write(body)
+        if path == "/map":
+            return self._send(200, render_map(world_names_by_uid(),
+                                              store.mapped_worlds(db()),
+                                              params.get("world", [""])[0]),
+                              "text/html; charset=utf-8")
 
         now = time.time()
         h = history()
@@ -2294,7 +2516,10 @@ class Handler(BaseHTTPRequestHandler):
             rows = store.characters(db(), user["steam_id"])
             stats = (me_stats(h, now, [c["name"] for c in rows if not c["hidden"]],
                               user["character"]) if user["character"] else None)
-            self._send(200, render_me(user, mine, rows, stats),
+            note = urllib.parse.unquote(params.get("map", [""])[0])
+            self._send(200, render_me(user, mine, rows, stats,
+                                      store.my_maps(db(), user["steam_id"]),
+                                      world_names_by_uid(), note),
                        "text/html; charset=utf-8")
         elif path in ("/", "/index.html"):
             user = current_user(self.headers)

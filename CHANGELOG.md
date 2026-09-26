@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+- **The map.** Upload a character file on `/me` and Skald keeps your fog of
+  war and your pins; `/map` shows everyone's, added together, with the share
+  of the world the group has seen between them.
+- **It keeps nothing else because it decodes nothing else.** The per-world
+  map is the second chunk of a `.fch`, right after five integers — so the
+  parser reads the header and the worlds and *stops*. Inventory, skills,
+  appearance, journal and name all sit after the part it reads and are never
+  looked at. That is the privacy promise made structural rather than
+  promised.
+- Stored at a bit a pixel and deflated: a 2048-square map is a few kilobytes
+  once compressed, not four megabytes.
+- The PNG is written by hand — a 1-bit paletted image, which is exactly what
+  the data already is. No image library, and Skald still has no
+  dependencies.
+- Hostile files are bounded rather than trusted: a map edge, a pin count and
+  an upload size are all capped, and anything unreadable comes back as a
+  sentence rather than a stack trace.
+- New `/map` and `/map.png?world=<uid>`.
+
 ## 0.5.1
 
 - **A server log kept in the events directory was read twice.** That is the
