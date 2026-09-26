@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.6.2
+
+- **Maps are compressed now, and Skald could not read them.** Valheim moved
+  the map into a gzip stream and started keeping a second grid beside the
+  first — what you uncovered, and what others uncovered for you. A character
+  created since writes every map that way, so one that plays only on a
+  server looked, to a reader that knew only the older shape, like someone
+  who had never been anywhere. Both shapes now read.
+- The two grids are **added together**, because a square someone else
+  revealed for you is a square you can see, and this is a map of where a
+  group has been.
+- **Pins are optional rather than fatal.** Their shape gained a field that
+  is not pinned down; a map with no pins is worth having, and a parser that
+  refuses the map because it could not read a label is not.
+
 ## 0.6.1
 
 - **A newly understood line now reaches the log that already held it.**

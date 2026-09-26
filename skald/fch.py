@@ -33,6 +33,7 @@ Layout, for anyone checking this against a file:
 """
 import re
 import struct
+import zlib
 
 MAX_EDGE = 4096          # 2048 today; a sanity bound, not a prediction
 MAX_WORLDS = 128
@@ -117,10 +118,17 @@ def parse(blob):
         raise Bad(f"unexpected character file version {version}")
 
     worlds = []
+    seen = set()
     for run in MAP_RUN.finditer(data):
         found = _map_at(data, run.start(), run.end())
         if found:
             worlds.append(found)
+            seen.add(found["uid"])
+    for at in _gzip_starts(data):
+        found = _packed_map_at(data, at)
+        if found and found["uid"] not in seen:
+            worlds.append(found)
+            seen.add(found["uid"])
     if len(worlds) > MAX_WORLDS:
         raise Bad("that file claims more worlds than anyone has")
     return {"version": version, "worlds": worlds}
@@ -176,6 +184,88 @@ def _map_at(data, run_start, run_end):
                 "explored": data[start:start + edge * edge], "pins": pins,
                 "map_version": map_version}
     return None
+
+
+GZIP = re.compile(rb"\x1f\x8b\x08")
+
+
+def _gzip_starts(data):
+    return (m.start() for m in GZIP.finditer(data))
+
+
+def _packed_map_at(data, at):
+    """A map stored the newer way: deflated, with two bitmaps inside.
+
+    Valheim moved the map into a gzip stream and started keeping a second
+    grid beside the first -- what you uncovered, and what other players
+    uncovered for you. A character created since writes every map this way,
+    which is why one that plays only on a server can look, to a reader that
+    only knows the older shape, like someone who has never been anywhere.
+
+        i32 byte-array length | i32 map version | i32 deflated length | gzip
+        gzip -> i32 edge | edge*edge explored | edge*edge explored by others
+
+    The two are added together: this is for a map of where a group has
+    been, and a square someone else revealed for you is a square you can
+    see.
+    """
+    if at < 13:
+        return None
+    packed_len = struct.unpack_from("<i", data, at - 4)[0]
+    map_version = struct.unpack_from("<i", data, at - 8)[0]
+    if not 0 < map_version < 100 or packed_len <= 0:
+        return None
+    if data[at - 13] != 1 or at + packed_len > len(data):
+        return None
+    try:
+        raw = zlib.decompress(data[at:at + packed_len], 31)
+    except zlib.error:
+        return None
+    if len(raw) < 4:
+        return None
+    edge = struct.unpack_from("<i", raw, 0)[0]
+    if not MIN_EDGE <= edge <= MAX_EDGE:
+        return None
+    n = edge * edge
+    if len(raw) < 4 + n:
+        return None
+    explored = raw[4:4 + n]
+    if len(raw) >= 4 + 2 * n:
+        others = raw[4 + n:4 + 2 * n]
+        explored = bytes(a | b for a, b in zip(explored, others, strict=True))
+    return {"uid": _uid_before(data, at - 13), "edge": edge,
+            "explored": explored, "pins": _pins_or_nothing(raw, 4 + 2 * n),
+            "map_version": map_version}
+
+
+def _pins_or_nothing(raw, at):
+    """Pins if they read cleanly, nothing if they do not.
+
+    Their shape gained a field Skald has not pinned down, and a map with no
+    pins is worth having; a parser that refuses the map because it could
+    not read a label is not.
+    """
+    if at >= len(raw):
+        return []
+    try:
+        r = Reader(raw)
+        r.i = at
+        count = r.i32()
+        if not 0 <= count <= MAX_PINS:
+            return []
+        pins = []
+        for _ in range(count):
+            name = r.string()
+            x, _y, z = r.f32x3()
+            kind = r.i32()
+            crossed = bool(r.u8())
+            if not name.isprintable():
+                return []
+            pins.append({"name": name, "x": x, "z": z, "type": kind,
+                         "crossed": crossed})
+        return pins
+    except (Bad, struct.error):
+        return []
 
 
 def _uid_before(data, flag_at):
