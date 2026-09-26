@@ -2,6 +2,7 @@
 
 ## 0.6.1
 
+<<<<<<< HEAD
 - **The map upload could not read a real character file.** It was written
   from a published description of version 33; files written today say
   version 46, and the layout moved. Every real upload was refused. Fixed,
@@ -21,6 +22,22 @@
 - Character files are commonly **not** under `AppData`: with cloud saves
   they live in Steam's `userdata/<id>/892970/remote/characters`. Both paths
   are now given on the upload form and in the docs.
+=======
+- **A newly understood line now reaches the log that already held it.**
+  Adding a pattern only ever matched lines that arrived *after* the upgrade:
+  each file's read offset already said "done", so nothing went back for the
+  rest. Raid history shipped in 0.6.0 and found nothing, because every raid
+  line in the logs had been read and discarded months before Skald knew what
+  one was.
+- Skald now records a digest of the patterns it understands. When that
+  changes, every event file is read again from the start — which costs a
+  little time and adds nothing twice, since ingestion is keyed by the line's
+  own text. Keyed on the patterns rather than the version, so a release that
+  changes no pattern re-reads nothing.
+- This is what made keeping the whole server log worth anything. Without it
+  the promise — that a new pattern is a Skald upgrade and nothing else — was
+  not true.
+>>>>>>> origin/main
 
 ## 0.6.0
 
