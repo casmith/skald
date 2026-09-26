@@ -162,3 +162,29 @@ know which settings the next time that server starts.
 passive mobs, no map) write nothing to the log at all — they appear only as
 bare numbers in `m=`. Skald counts a world with them as modified and cannot
 name them.
+
+## Raids
+
+The server logs a raid the moment it starts, with an exact time:
+
+```
+09/25/2026 16:27:47: Random event set:army_bonemass
+```
+
+It logs nothing when one ends, so a raid is a moment here rather than a
+span. `Random event set:` with nothing after it is the event being cleared,
+and is not a raid starting.
+
+The ids are the game's own. The ten core ones come from its main event list
+and the rest from each biome's location list, and every one has an
+`event_<name>_start` / `_end` localisation pair — which is how we know the
+list is complete rather than remembered. The labels Skald shows are its own,
+describing the raid rather than quoting the game's message, which lives in
+the localisation assets.
+
+A raid needs someone online to be sent, so the players in a session that
+covers the moment are shown beside it.
+
+This is a good example of why the whole log is worth keeping: raids were
+documented as "not in the log", which was true of the narrow filtered file.
+Nothing about the game changed — only how much of its log we kept.

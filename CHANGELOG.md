@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- **Raid history.** The server logs every raid as it starts, with an exact
+  time — `Random event set:army_bonemass` — so the dashboard now lists what
+  came for you, when, and who was online for it. No game-server change was
+  needed: Skald already reads the whole log.
+- The docs said raids were not in the log at all. That was true of the
+  *filtered* log the hook used to write; capturing everything is what
+  exposed them.
+- The raid list comes from the game's own asset bundles, not memory: the ten
+  the core event list references, plus the Mistlands, Ashlands, Deep North
+  and mountain-cave raids from their biomes' location lists. Each one also
+  has an `event_<name>_start`/`_end` localisation pair, which is how we know
+  the list is the game's. An unknown id still reads as something.
+- `Random event set:` with nothing after it is the event *ending*, and is
+  not recorded as a raid starting.
+- New `/api/raids`.
+
 ## 0.5.1
 
 - **A server log kept in the events directory was read twice.** That is the

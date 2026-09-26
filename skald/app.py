@@ -182,6 +182,11 @@ EVENT_RES = [
     # so both shapes have to be kept.
     ("modifier", re.compile(r"Setting world modifier: (\w+)->(\w+)"), 3),
     ("preset", re.compile(r"Setting world modifier preset: (\w+)"), 3),
+    # A raid. The server logs the start with an exact time and says nothing
+    # when it ends, so a raid is a moment, not a span. `Random event set:`
+    # with nothing after it is the event being cleared, which is not a raid
+    # starting and must not be recorded as one.
+    ("raid", re.compile(r"Random event set:(\S+)"), 3),
 ]
 
 # What the game calls each setting, and each of its values, in words. A name
@@ -198,6 +203,39 @@ MODIFIER_LABELS = {
     "raids": "Raids", "portals": "Portals",
 }
 MODIFIER_ORDER = list(MODIFIER_LABELS)
+
+# Raids, by the id the server logs, taken from the game's own bundles --
+# each one also has an `event_<name>_start`/`_end` localisation pair, which
+# is how we know this list is the game's rather than remembered. The first
+# ten are the core set (referenced by _GameMain); the rest come from a
+# biome's own location list and belong to later content.
+#
+# The labels are ours. The game's actual message ("a foul smell from the
+# swamp") lives in the localisation assets, which are not extracted here --
+# so these describe the raid rather than quoting it.
+RAIDS = {
+    "army_eikthyr": "Eikthyr's army",
+    "army_theelder": "The Elder's army",
+    "army_bonemass": "Bonemass' army",
+    "army_moder": "Moder's army",
+    "army_goblin": "Fuling army",
+    "foresttrolls": "Troll raid",
+    "skeletons": "Skeleton raid",
+    "blobs": "Blob raid",
+    "wolves": "Wolf raid",
+    "surtlings": "Surtling raid",
+    "ghosts": "Ghost raid",
+    # Mistlands, Ashlands, Deep North, mountain caves.
+    "army_seekers": "Seeker army",
+    "army_gjall": "Gjall army",
+    "army_charred": "Charred army",
+    "army_charredspawners": "Charred spawner army",
+    "army_elakingar": "Elakingar army",
+    "army_jotuns": "Jotun army",
+    "bats": "Bat raid",
+    "gemgoblin": "Gem goblin raid",
+}
+
 MODIFIER_VALUES = {
     "veryeasy": "very easy", "easy": "easy", "normal": "normal", "hard": "hard",
     "veryhard": "very hard", "casual": "casual", "hardcore": "hardcore",
@@ -404,6 +442,8 @@ def replay_world(world, evs, out):
                 out["keys"].append({"world": world, "key": key, "ts": ts})
         elif kind == "bossspawn":
             out["spawns"].append({"world": world, "ts": ts})
+        elif kind == "raid":
+            out["raids"].append({"world": world, "ts": ts, "event": args[0]})
         elif kind in ("modifier", "preset"):
             out["modifiers"].append({"world": world, "ts": ts, "kind": kind,
                                      "key": args[0],
@@ -431,12 +471,13 @@ def build_history():
       spawns    [{world, ts}], boss summons
     """
     out = {"sessions": [], "deaths": [], "explored": [], "keys": [], "spawns": [],
-           "modifiers": []}
+           "modifiers": [], "raids": []}
     for world, evs in load_events().items():
         replay_world(world, evs, out)
     sessions, deaths, explored = out["sessions"], out["deaths"], out["explored"]
     keys, spawns = out["keys"], out["spawns"]
     out["modifiers"].sort(key=lambda m: m["ts"])
+    out["raids"].sort(key=lambda r: r["ts"])
     for s in sessions:
         s.pop("seen_leave", None)  # internal bookkeeping, not part of the API
     sessions.sort(key=lambda s: s["start"])
@@ -445,7 +486,8 @@ def build_history():
     keys.sort(key=lambda k: k["ts"])
     spawns.sort(key=lambda k: k["ts"])
     return {"sessions": sessions, "deaths": deaths, "explored": explored,
-            "keys": keys, "spawns": spawns, "modifiers": out["modifiers"]}
+            "keys": keys, "spawns": spawns, "modifiers": out["modifiers"],
+            "raids": out["raids"]}
 
 
 _CACHE = {"sig": None, "history": None}
@@ -1199,7 +1241,40 @@ def for_world(h, world):
     """History narrowed to one world, in the same shape as history()."""
     return {k: [x for x in h[k] if x["world"] == world]
             for k in ("sessions", "deaths", "explored", "keys", "spawns",
-                      "modifiers")}
+                      "modifiers", "raids")}
+
+
+def raid_label(event):
+    """A name for a raid id. An unknown one still reads as something.
+
+    Valheim has added raids biome by biome and will again, so an id we have
+    never met is tidied up rather than dropped.
+    """
+    known = RAIDS.get(event)
+    if known:
+        return known
+    name = " ".join(re.sub(r"^army_", "", event).replace("_", " ").split())
+    if not name:
+        return event
+    return f"{name.capitalize()} army" if event.startswith("army_") \
+        else f"{name.capitalize()} raid"
+
+
+def raids(h, now, limit=50):
+    """Raids, newest first: when, which, and who was there for it.
+
+    The server logs a raid starting, with an exact time, and says nothing
+    when it ends -- so a raid is a moment here, not a span.
+    """
+    out = []
+    for r in reversed(h["raids"][-limit:]):
+        online = sorted({
+            s["player"] for s in h["sessions"]
+            if s["world"] == r["world"]
+            and s["start"] <= r["ts"] <= (now if s["end"] is None else s["end"])})
+        out.append({"world": r["world"], "ts": r["ts"], "event": r["event"],
+                    "label": raid_label(r["event"]), "online": online})
+    return out
 
 
 def for_players(h, names):
@@ -1212,7 +1287,7 @@ def for_players(h, names):
     names = set(names)
     return {"sessions": [x for x in h["sessions"] if x["player"] in names],
             "deaths": [x for x in h["deaths"] if x["player"] in names],
-            "explored": [], "keys": [], "spawns": [], "modifiers": []}
+            "explored": [], "keys": [], "spawns": [], "modifiers": [], "raids": []}
 
 
 def me_stats(h, now, names, primary):
@@ -1477,6 +1552,12 @@ def render(h, now, world, user=None):
                 f'<div class="trophy locked"><div class="medal">{NUMERALS[i]}</div>'
                 f'<div class="boss" aria-label="Unknown boss">???</div>'
                 f'<div class="when">not yet slain</div></div>')
+    raid_rows = [
+        f'<tr><td>{t(r["ts"])}</td>'
+        f'<td><b>{html.escape(r["label"])}</b></td>'
+        f'<td>{html.escape(", ".join(r["online"])) or "&mdash;"}</td></tr>'
+        for r in raids(for_world(h, world), now, 15)
+    ]
     ms_rows = [
         f'<tr><td><span class="kind kind-{m["kind"]}">{html.escape(m["kind"])}</span> '
         f'{html.escape(m["label"])}</td>'
@@ -1496,6 +1577,7 @@ def render(h, now, world, user=None):
             .replace("__WEATHER__", weather_card)
             .replace("__TROPHIES__", f'<div class="trophies">{"".join(badges)}</div>')
             .replace("__MILESTONES__", "\n".join(ms_rows) or empty(3))
+            .replace("__RAIDS__", "\n".join(raid_rows) or empty(3))
             .replace("__PLAYTIME__", "\n".join(rows) or empty(6))
             .replace("__DEATHS__", "\n".join(death_rows) or empty(6))
             .replace("__CHARTS__", charts)
@@ -1688,6 +1770,15 @@ __TROPHIES__
 </tr></thead><tbody>
 __MILESTONES__
 </tbody></table></div>
+
+<h2>Raids</h2>
+<div class="wrap"><table><thead><tr>
+ <th>When</th><th>Raid</th><th>Online at the time</th>
+</tr></thead><tbody>
+__RAIDS__
+</tbody></table></div>
+<p class="muted">The server logs a raid starting and says nothing when it ends, so these
+ are the moment each began. A raid needs someone online to be sent at all.</p>
 <p class="muted note">Kills the server logged show their exact time, and how long after the boss
  was summoned it fell. Earlier ones are dated from the world's autosaves (a 30-minute window) or, before
  those were watched, its hourly backups (about 90 minutes).</p>
@@ -2281,6 +2372,8 @@ class Handler(BaseHTTPRequestHandler):
                  **(world_settings(h, w) or {"preset": None, "modifiers": [],
                                              "since": None})}
                 for w in worlds_of(h) if not requested or w == world]})
+        elif path == "/api/raids":
+            self._json({"raids": raids(hw, now, arg("limit", 100))})
         elif path == "/api/milestones":
             self._json({"milestones": [m for m in milestones(h)
                                        if not requested or m["world"] == world]})
