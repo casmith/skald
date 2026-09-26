@@ -63,6 +63,7 @@ server](#trying-it-without-a-server).)*
   and a 7-day forecast.
 - **How the world is set up** — combat, death penalty, resources, raids and
   portals, or the preset the server was started with.
+- **Raids** — what came for you, when, and who was online for it.
 - **Charts** of player-hours, deaths and exploration per day.
 - **Optional sign-in through Steam**, which works out which characters are
   yours, greets you by the one you play most, and gives you a page of your
