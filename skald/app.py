@@ -42,6 +42,7 @@ Python stdlib only.
 """
 import glob
 import gzip
+import hashlib
 import html
 import json
 import os
@@ -271,6 +272,17 @@ STATUS = {}
 LAST_NONZERO = {}
 
 
+def parser_signature():
+    """What Skald currently knows how to read, as a short digest.
+
+    Keyed on the patterns themselves rather than the version: a release that
+    changes no pattern should not make every server re-read its logs, and a
+    change to one should, whatever the version says.
+    """
+    material = repr([(kind, rx.pattern, prio) for kind, rx, prio in EVENT_RES])
+    return hashlib.sha256(material.encode()).hexdigest()[:16]
+
+
 def parse_line(line):
     m = TS_RE.search(line)
     if not m:
@@ -366,6 +378,23 @@ def parse_any(line):
     return parse_line(unwrap(line))
 
 
+def catch_up_if_patterns_changed():
+    """If Skald has learned a new line since last time, read the logs again.
+
+    This is what makes keeping the whole server log worth anything. Without
+    it a pattern added today only ever matches lines that arrive after the
+    upgrade: the file has already been read to the end, and the offset says
+    so. Raid lines sat in the logs unread for exactly this reason.
+    """
+    conn = db()
+    now_sig = parser_signature()
+    if store.meta(conn, "parser_signature") == now_sig:
+        return False
+    store.forget_how_far_files_were_read(conn)
+    store.set_meta(conn, "parser_signature", now_sig)
+    return True
+
+
 def ingest_events():
     """Take in whatever has been written since last time.
 
@@ -374,6 +403,9 @@ def ingest_events():
     way. Returns how many lines were new.
     """
     added = 0
+    if catch_up_if_patterns_changed():
+        print("skald understands a line it did not before; re-reading the logs",
+              flush=True)
     for path in event_paths():
         world = os.path.basename(path).split(".", 1)[0]
         # A hook file holds only the lines Skald asked for, so anything in

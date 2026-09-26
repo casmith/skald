@@ -6,7 +6,7 @@ object. Both are read the same way as the hook's files.
 """
 import json
 
-from tests.conftest import ALFR, BERA, WORLD, join, leave, line
+from tests.conftest import ALFR, BERA, WORLD, join, leave, line, stamp
 
 from skald import app, config
 
@@ -118,3 +118,45 @@ def test_a_missing_log_is_not_mistaken_for_an_empty_one(tracker):
     assert app.ingest_events() == 0
     d = app.diagnostics(app.history(), T)
     assert d["worlds"][0]["events_file"]["exists"] is False
+
+
+def test_a_new_pattern_reaches_lines_already_read(tracker):
+    """The point of keeping the whole log.
+
+    A line Skald learns to read today is usually one that was written --
+    and scrolled past -- weeks ago. The file's offset says it has been
+    read, so without this the new pattern only ever matches what arrives
+    next, and the log everyone kept is worth nothing.
+    """
+    from skald import store
+    T = 1_800_000_000
+    path = tracker.dirs["events"] / f"{WORLD}.log"
+    path.write_text(f"{stamp(T)}: Random event set:army_bonemass\n"
+                    f"{stamp(T + 60)}: Got connection SteamID 76561190000000001\n")
+    app._CACHE.update(sig=None, history=None)
+    app.ingest_events()
+    assert len(app.history()["raids"]) == 1
+
+    # Pretend the raid pattern is new: drop what we learned, and claim the
+    # parser was a different one when the file was read.
+    conn = app.db()
+    conn.execute("DELETE FROM events WHERE kind = 'raid'")
+    conn.commit()
+    store.set_meta(conn, "parser_signature", "something-older")
+    app._CACHE.update(sig=None, history=None)
+
+    app.ingest_events()
+    assert len(app.history()["raids"]) == 1, "the line was never read again"
+    assert store.meta(conn, "parser_signature") == app.parser_signature()
+
+
+def test_unchanged_patterns_do_not_re_read(tracker):
+    """Re-reading is cheap, not free: it must happen when something changed
+    and not on every poll."""
+    T = 1_800_000_000
+    path = tracker.dirs["events"] / f"{WORLD}.log"
+    path.write_text(f"{stamp(T)}: Got connection SteamID 76561190000000001\n")
+    app._CACHE.update(sig=None, history=None)
+    app.ingest_events()
+    assert app.catch_up_if_patterns_changed() is False
+    assert app.ingest_events() == 0
