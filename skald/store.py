@@ -514,6 +514,28 @@ def mapped_worlds(conn):
         " max(uploaded) AS newest FROM maps GROUP BY world_uid")]
 
 
+def meta(conn, key):
+    row = conn.execute("SELECT v FROM meta WHERE k = ?", (key,)).fetchone()
+    return row["v"] if row else None
+
+
+def set_meta(conn, key, value):
+    with conn:
+        conn.execute("INSERT OR REPLACE INTO meta (k, v) VALUES (?, ?)", (key, value))
+
+
+def forget_how_far_files_were_read(conn):
+    """Make every event file be read again from the start.
+
+    Called when the set of lines Skald recognises has changed. Ingestion is
+    keyed by the line's own text, so re-reading a file costs a little time
+    and adds nothing twice -- and it is the only way a newly understood
+    line that was already scrolled past can ever be picked up.
+    """
+    with conn:
+        conn.execute("UPDATE files SET size = 0, mtime = 0, skipped = 0")
+
+
 def import_legacy(conn, data_dir):
     """Bring milestones.json in, once, so upgrades keep their history.
 
