@@ -17,6 +17,26 @@
 - `Random event set:` with nothing after it is the event *ending*, and is
   not recorded as a raid starting.
 - New `/api/raids`.
+- **Four milestone keys named**, taken from the game's own asset bundles:
+  `defeated_frozenking`, `defeated_frozenking_p3`, `defeated_hive` and
+  `killed_frysling`. All Deep North, which is unfinished — so nobody can set
+  them yet, and that is exactly why they are worth naming before anyone can.
+  The list came from every Character prefab's `m_defeatSetGlobalKey`, which
+  is where these live: they are not in the code, which is why
+  `defeated_writhan` was in our worlds and nowhere in the assembly.
+- They are deliberately **not** kind `boss`, however much FrozenKing looks
+  like one. The badge row is driven by `BOSSES`, and a `boss` missing from
+  that list is filtered out of the table *and* absent from the badges — it
+  would disappear entirely. A test now enforces that invariant.
+- **`bosshildir1`–`3` marked unverified.** Unlike every other key, they
+  appear in neither the assembly nor any prefab, and no world of ours has
+  one. Kept, since a key that never arrives shows nothing, but no longer
+  presented as evidence.
+- Generated labels no longer contain a double space (`killed_seekerbrood`
+  read as "First  seekerbrood killed"), and a key that is nothing but a
+  prefix no longer renders with a leading one.
+
+
 - **Milestones are newest first**, on the page and in `/api/milestones`.
   They were the only list in Skald running the other way — `/api/sessions`
   and `/api/deaths` have always been newest first — so the kill you just
@@ -38,6 +58,24 @@
 - A webhook deleted in Discord answers 404 for ever, so failures are
   counted and the subscription switches itself off after ten rather than
   posting into the void every minute. The error shows on `/me`.
+- **The map.** Upload a character file on `/me` and Skald keeps your fog of
+  war and your pins; `/map` shows everyone's, added together, with the share
+  of the world the group has seen between them.
+- **It keeps nothing else because it decodes nothing else.** The per-world
+  map is the second chunk of a `.fch`, right after five integers — so the
+  parser reads the header and the worlds and *stops*. Inventory, skills,
+  appearance, journal and name all sit after the part it reads and are never
+  looked at. That is the privacy promise made structural rather than
+  promised.
+- Stored at a bit a pixel and deflated: a 2048-square map is a few kilobytes
+  once compressed, not four megabytes.
+- The PNG is written by hand — a 1-bit paletted image, which is exactly what
+  the data already is. No image library, and Skald still has no
+  dependencies.
+- Hostile files are bounded rather than trusted: a map edge, a pin count and
+  an upload size are all capped, and anything unreadable comes back as a
+  sentence rather than a stack trace.
+- New `/map` and `/map.png?world=<uid>`.
 
 ## 0.5.1
 
