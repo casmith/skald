@@ -65,8 +65,9 @@ server](#trying-it-without-a-server).)*
   portals, or the preset the server was started with.
 - **Charts** of player-hours, deaths and exploration per day.
 - **Optional sign-in through Steam**, which works out which characters are
-  yours, greets you by the one you play most, and gives you a page of your
-  own numbers. Nothing changes for people who do not sign in.
+  yours, greets you by the one you play most, gives you a page of your own
+  numbers, and can post to a Discord webhook when someone comes online or a
+  boss falls. Nothing changes for people who do not sign in.
 - JSON for all of it, if you would rather build your own view.
 
 ## How it knows
