@@ -67,6 +67,8 @@ adds personal features. Nothing changes for people who do not.
       discard the rest — structurally, since the map is read before the
       player and the parser stops there
 - [x] Merge everyone's exploration into one map of what the group has seen
+      — and then discover the game already does it, in the cartography
+      table, which the world save carries (0.7.0)
 - [ ] Maybe: render terrain from the world seed, so the fog sits on a real map
 
 ## M5 — Later
