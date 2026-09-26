@@ -1,7 +1,24 @@
 # Changelog
 
-## 0.6.2
+## 0.7.0
 
+- **The group's map, with nobody uploading anything.** A world's own save
+  holds its cartography table: everything anyone who used one has shared to
+  it. Skald already mounts those saves to read the world clock, so `/map`
+  now shows a real group map for every world it watches, kept current by the
+  game itself.
+- It is a far better source than an uploaded character. On the world this
+  was built against, the table holds **154,355** explored pixels; the
+  fullest single character file we had held 3,920. Nothing is uploaded,
+  nothing leaves the server, and it covers everyone who used a table rather
+  than everyone who could be bothered.
+- Found by shape, like a character's map — a run of `edge × edge` bytes
+  every one of which is 0 or 1 is not anything else. A world save is a heap
+  of chunks with no index to the thing we want.
+- Read once per save: a file whose size and modification time have not moved
+  is not decompressed again, because a world saves every half hour and this
+  is four megabytes.
+- Uploaded characters still work, for worlds with no table.
 - **Maps are compressed now, and Skald could not read them.** Valheim moved
   the map into a gzip stream and started keeping a second grid beside the
   first — what you uncovered, and what others uncovered for you. A character
