@@ -130,3 +130,45 @@ def test_a_save_format_skald_has_not_seen_is_read_anyway(tracker, capsys):
     assert state["save"]["version"] == 99
     assert state["save"]["world_time"] == 4242.0   # still usable
     assert EIKTHYR in state["live"]
+
+
+def test_a_generated_label_has_no_double_space():
+    """`killed_surtling` and `killedbat` are both real spellings, so the
+    separator is optional -- and stripping it used to leave a gap."""
+    assert app.milestone_label("killed_seekerbrood") == (
+        "First seekerbrood killed", "other")
+    assert app.milestone_label("killedabomination") == (
+        "First abomination killed", "other")
+    assert app.milestone_label("defeated_morgen") == ("Morgen defeated", "other")
+    # A key matching neither prefix keeps its old shape: no invented "First".
+    assert app.milestone_label("bosshildir4") == ("Bosshildir4 killed", "other")
+
+
+def test_no_generated_label_is_blank_or_ragged():
+    for key in ["defeated_", "killed_", "killed", "defeated_a_b_c", "killedx"]:
+        label, _ = app.milestone_label(key)
+        assert label.strip() == label
+        assert "  " not in label
+
+
+def test_the_keys_from_the_games_own_bundles_are_named():
+    """Extracted from every Character prefab's m_defeatSetGlobalKey. Deep
+    North is unfinished, so nobody can set these yet -- which is exactly why
+    they are worth naming before anyone can."""
+    for key in ["defeated_frozenking", "defeated_frozenking_p3", "defeated_hive",
+                "killed_frysling", "defeated_serpent", "defeated_writhan",
+                "killed_surtling"]:
+        label, kind = app.milestone_label(key)
+        assert kind != "other", f"{key} should have a hand-written label"
+        assert key.split("_")[-1][:4].lower() in label.lower().replace(" ", "") \
+            or key in ("defeated_serpent", "defeated_frozenking_p3")
+
+
+def test_a_boss_kind_must_be_in_the_badge_row(tracker):
+    """The trap: the table skips kind "boss" because the badges show those
+    instead -- so a "boss" missing from BOSSES is filtered out of the table
+    and absent from the badges, and disappears entirely."""
+    badge_keys = {key for key, _ in app.BOSSES}
+    for key, (_, kind) in app.MILESTONES.items():
+        if kind == "boss":
+            assert key in badge_keys, f"{key} is kind 'boss' but not in BOSSES"
