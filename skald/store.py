@@ -116,6 +116,25 @@ SCHEMA = [
     CREATE UNIQUE INDEX one_primary_per_player
         ON characters (steam_id) WHERE is_primary = 1;
     """,
+    # v6: where to send someone a message, and what about. One row per
+    # player: a webhook is a place, not a per-event setting, and `kinds`
+    # holds what they asked for.
+    #
+    # `failures` exists because a webhook someone deleted in Discord answers
+    # 404 for ever, and a dashboard that keeps posting into the void every
+    # minute is the sort of thing that gets an IP rate-limited.
+    """
+    CREATE TABLE subscriptions (
+        steam_id   TEXT PRIMARY KEY REFERENCES users(steam_id),
+        url        TEXT NOT NULL,
+        kinds      TEXT NOT NULL,          -- JSON list
+        created    REAL NOT NULL,
+        enabled    INTEGER NOT NULL DEFAULT 1,
+        failures   INTEGER NOT NULL DEFAULT 0,
+        last_error TEXT,
+        last_sent  REAL
+    );
+    """,
 ]
 
 
@@ -390,6 +409,58 @@ def end_session(conn, token_hash):
 def expire_sessions(conn, when):
     with conn:
         conn.execute("DELETE FROM sessions WHERE expires <= ?", (when,))
+
+
+def subscription(conn, steam_id):
+    row = conn.execute("SELECT * FROM subscriptions WHERE steam_id = ?",
+                       (steam_id,)).fetchone()
+    if not row:
+        return None
+    out = dict(row)
+    out["kinds"] = json.loads(out["kinds"])
+    return out
+
+
+def subscribers(conn, kind):
+    """Everyone who wants this kind of message, and can still be sent one."""
+    out = []
+    for row in conn.execute("SELECT * FROM subscriptions WHERE enabled = 1"):
+        d = dict(row)
+        d["kinds"] = json.loads(d["kinds"])
+        if kind in d["kinds"]:
+            out.append(d)
+    return out
+
+
+def subscribe(conn, steam_id, url, kinds, when):
+    """Save where to send, and what. Re-enables a webhook that had failed."""
+    with conn:
+        conn.execute(
+            "INSERT INTO subscriptions (steam_id, url, kinds, created)"
+            " VALUES (?, ?, ?, ?)"
+            " ON CONFLICT(steam_id) DO UPDATE SET url = ?, kinds = ?,"
+            " enabled = 1, failures = 0, last_error = NULL",
+            (steam_id, url, json.dumps(kinds), when, url, json.dumps(kinds)))
+
+
+def unsubscribe(conn, steam_id):
+    with conn:
+        conn.execute("DELETE FROM subscriptions WHERE steam_id = ?", (steam_id,))
+
+
+def delivered(conn, steam_id, when):
+    with conn:
+        conn.execute("UPDATE subscriptions SET failures = 0, last_error = NULL,"
+                     " last_sent = ? WHERE steam_id = ?", (when, steam_id))
+
+
+def delivery_failed(conn, steam_id, error, give_up_at=10):
+    """Count a failure, and stop trying once a webhook is clearly gone."""
+    with conn:
+        conn.execute(
+            "UPDATE subscriptions SET failures = failures + 1, last_error = ?,"
+            " enabled = CASE WHEN failures + 1 >= ? THEN 0 ELSE enabled END"
+            " WHERE steam_id = ?", (str(error)[:200], give_up_at, steam_id))
 
 
 def import_legacy(conn, data_dir):
