@@ -172,3 +172,29 @@ def test_a_boss_kind_must_be_in_the_badge_row(tracker):
     for key, (_, kind) in app.MILESTONES.items():
         if kind == "boss":
             assert key in badge_keys, f"{key} is kind 'boss' but not in BOSSES"
+
+
+def test_newest_first(tracker):
+    """The kill you just made is the one you came to look at -- and the same
+    way round as /api/sessions and /api/deaths, which are newest first too."""
+    tracker.write_save(1, [EIKTHYR], T)
+    app.scan_saves()
+    tracker.write_save(2, [EIKTHYR, ELDER], T + 1800)
+    app.scan_saves()
+    tracker.write_save(3, [EIKTHYR, ELDER, "killedtroll"], T + 3600)
+    app.scan_saves()
+    got = app.milestones({"sessions": [], "keys": [], "spawns": []})
+    assert [m["key"] for m in got] == ["killedtroll", ELDER, EIKTHYR]
+
+
+def test_keys_found_together_keep_a_stable_order(tracker):
+    """Everything in a baseline save shares one `latest`, so the tie-break
+    has to be deterministic -- otherwise the table reshuffles itself on
+    every refresh."""
+    tracker.write_save(1, [EIKTHYR, ELDER, "killedtroll"], T)
+    app.scan_saves()
+    first = [m["key"] for m in app.milestones({"sessions": [], "keys": [], "spawns": []})]
+    for _ in range(5):
+        again = [m["key"] for m in app.milestones({"sessions": [], "keys": [],
+                                                   "spawns": []})]
+        assert again == first

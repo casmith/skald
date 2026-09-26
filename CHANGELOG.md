@@ -35,6 +35,14 @@
 - Generated labels no longer contain a double space (`killed_seekerbrood`
   read as "First  seekerbrood killed"), and a key that is nothing but a
   prefix no longer renders with a leading one.
+
+
+- **Milestones are newest first**, on the page and in `/api/milestones`.
+  They were the only list in Skald running the other way — `/api/sessions`
+  and `/api/deaths` have always been newest first — so the kill you just
+  made was at the bottom of the table.
+- Keys found in the same scan share a timestamp, so the tie is broken
+  deterministically and the table no longer reshuffles between refreshes.
 - **Tell me about it.** Sign in, paste a Discord webhook, and Skald posts
   when someone comes online or a boss falls. No bot, no gateway, no
   dependency — one POST of one JSON field, from the poller that was already
