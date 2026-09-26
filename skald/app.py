@@ -57,6 +57,7 @@ import zipfile
 from skald import __version__
 from skald import auth
 from skald import config as configuration
+from skald import notify
 from skald import store
 from skald import weather
 from datetime import datetime, timedelta, UTC
@@ -526,12 +527,71 @@ def poll_once():
             _CACHE["history"] = None
 
 
+# What the last tick saw, so a tick can tell what is new. Empty until the
+# first one has run: a restart must not announce everything that has ever
+# happened, and neither must a new subscriber.
+WATCH = {"primed": False, "online": set(), "milestones": set()}
+
+
+def notify_tick(h, now, send=notify.send):
+    """Send what has happened since the last tick. Returns what was sent.
+
+    Deliberately *not* driven by the database's history: it asks what is
+    true now and compares with what was true a minute ago, so nothing that
+    happened while Skald was down is announced when it comes back.
+    """
+    online = {(s["world"], s["player"]) for s in h["sessions"] if s["end"] is None}
+    keys = {(m["world"], m["key"]) for m in milestones(h)}
+
+    if not WATCH["primed"]:
+        WATCH.update(primed=True, online=online, milestones=keys)
+        return []
+
+    messages = []
+    for world, player in sorted(online - WATCH["online"]):
+        messages.append(("online", player, f"**{player}** is online on *{world}*."))
+    for m in milestones(h):
+        if (m["world"], m["key"]) in WATCH["milestones"]:
+            continue
+        who = ", ".join(m["online"])
+        messages.append(("milestone", None, f"**{m['label']}** on *{m['world']}*"
+                         + (f" — {who}." if who else ".")))
+
+    WATCH.update(online=online, milestones=keys)
+
+    sent = []
+    for kind, about, text in messages:
+        for sub in store.subscribers(db(), kind):
+            # Nobody wants to be told that they have arrived.
+            if kind == "online" and about and is_me(sub["steam_id"], about):
+                continue
+            try:
+                send(sub["url"], text)
+                store.delivered(db(), sub["steam_id"], now)
+                sent.append((sub["steam_id"], text))
+            except Exception as e:
+                store.delivery_failed(db(), sub["steam_id"], e)
+    return sent
+
+
+def is_me(steam_id, player):
+    """Whether a character belongs to this account, by its claim."""
+    return any(c["name"] == player and not c["hidden"]
+               for c in store.characters(db(), steam_id))
+
+
 def poller():
     while True:
         try:
             poll_once()
         except Exception as e:
             print(f"poll failed: {e}", flush=True)
+        try:
+            # After the poll, so a crash marker written above is already in
+            # the history this reads. Never allowed to stop the poller.
+            notify_tick(history(), time.time())
+        except Exception as e:
+            print(f"notify failed: {e}", flush=True)
         time.sleep(POLL_SECONDS)
 
 
@@ -1827,7 +1887,7 @@ def yes_no(ok, good="yes", bad="no"):
     return f'<span class="{cls}">{good if ok else bad}</span>'
 
 
-def render_me(user, chars, rows_db, stats=None):
+def render_me(user, chars, rows_db, stats=None, sub=None, rejected=False):
     """Your page: your numbers, your characters, your last few evenings."""
     state = {r["name"]: r for r in rows_db}
     primary = next((r["name"] for r in rows_db if r["is_primary"]), None)
@@ -1877,7 +1937,45 @@ def render_me(user, chars, rows_db, stats=None):
             .replace("__STATS__", render_my_stats(stats))
             .replace("__BODY__", body)
             .replace("__LEAD__", f'<p class="note">{lead}</p>' if lead else "")
-            .replace("__SESSIONS__", render_my_sessions(stats)))
+            .replace("__SESSIONS__", render_my_sessions(stats))
+            .replace("__NOTIFY__", render_notify(sub, rejected)))
+
+
+def render_notify(sub, rejected=False):
+    """Where to send you a message, and what about."""
+    checked = set(sub["kinds"]) if sub else set(notify.KINDS)
+    boxes = "".join(
+        f'<label><input type="checkbox" name="{k}"'
+        + (" checked" if k in checked else "") + f'> {label}</label>'
+        for k, label in (("online", "someone comes online"),
+                         ("milestone", "a boss falls")))
+    state = extra = ""
+    if sub:
+        bits = [f'Sending to <b>{html.escape(notify.masked(sub["url"]))}</b>']
+        if sub["last_sent"]:
+            bits.append(f'last sent {t(sub["last_sent"])}')
+        if sub["failures"]:
+            bits.append(f'<span class="bad">{html.escape(sub["last_error"] or "")}</span>')
+        state = '<p class="facts">' + " &middot; ".join(bits) + "</p>"
+        extra = ('<form method="post" action="/me/notify/test" class="inline">'
+                 '<button type="submit">send a test</button></form>'
+                 '<form method="post" action="/me/notify/off" class="inline">'
+                 '<button type="submit">stop</button></form>')
+    warn = ('<p class="facts bad">That was not a Discord webhook URL, so nothing '
+            'was saved.</p>' if rejected else "")
+    required = "" if sub else " required"
+    return ('<h2>Tell me about it</h2>' + warn + state
+            + '<form method="post" action="/me/notify" class="notify">'
+            + f'<input type="url" name="url" value=""{required}'
+            + ' placeholder="https://discord.com/api/webhooks/...">'
+            + f'<div class="kinds">{boxes}</div>'
+            + '<button type="submit">save</button></form>' + extra
+            + '<p class="note">A Discord webhook: <b>Server Settings &rarr; '
+            'Integrations &rarr; Webhooks &rarr; New Webhook</b>, then copy its URL. '
+            'Only Discord webhook URLs are accepted &mdash; anything else would let a '
+            'signed-in stranger aim this server at a machine of their choosing. '
+            'Saving with the box empty keeps the webhook you have; unticking '
+            'everything stops the messages.</p>')
 
 
 def ordinal(n):
@@ -1989,6 +2087,13 @@ ME_PAGE = """<!doctype html>
   color:var(--muted)}
  tr.off td{opacity:.45}
  p.note{color:var(--muted);font-size:.85rem}
+ .bad{color:#e07a5f}
+ .notify{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem;margin:.3rem 0}
+ .notify input[type=url]{flex:1 1 22rem;font:inherit;font-size:.85rem;color:var(--fg);
+  background:var(--panel);border:1px solid var(--line);border-radius:3px;padding:.3rem .5rem}
+ .kinds{display:flex;gap:.8rem;font-size:.82rem;color:var(--muted)}
+ .kinds label{display:flex;align-items:center;gap:.3rem}
+ form.inline{display:inline}
  h2{font:600 1.05rem 'Cinzel',Georgia,serif;color:var(--gold);letter-spacing:.05em;
   margin:2rem 0 .7rem;display:flex;align-items:center;gap:.7rem}
  h2::after{content:"";flex:1;height:1px;background:linear-gradient(90deg,var(--bronze),transparent)}
@@ -2020,6 +2125,7 @@ __STATS__
 __BODY__
 __LEAD__
 __SESSIONS__
+__NOTIFY__
 <p class="note">Only characters this Steam account has been seen playing are listed &mdash; Skald
  reads that pairing from the server&rsquo;s own log, so there is nothing to type in, nothing to
  prove, and no way to take a character you have not played. None of it is public: your
@@ -2207,9 +2313,38 @@ class Handler(BaseHTTPRequestHandler):
             if token:
                 store.end_session(db(), auth.token_hash(token))
             return self._redirect("/", auth.clear_cookie_header(CONFIG.secure_cookies))
+        if path in ("/me/notify", "/me/notify/test", "/me/notify/off"):
+            return self._notify_post(path)
         if path in ("/me/primary", "/me/hide", "/me/mine"):
             return self._me_post(path)
         self._send(404, "not found", "text/plain")
+
+    def _notify_post(self, path):
+        user = current_user(self.headers)
+        if not user:
+            return self._send(403, "sign in first", "text/plain")
+        conn, steam_id = db(), user["steam_id"]
+        if path == "/me/notify/off":
+            store.unsubscribe(conn, steam_id)
+            return self._redirect("/me")
+        if path == "/me/notify/test":
+            sub = store.subscription(conn, steam_id)
+            if sub:
+                try:
+                    notify.send(sub["url"], "Skald is wired up. This is the test.")
+                    store.delivered(conn, steam_id, time.time())
+                except Exception as e:
+                    store.delivery_failed(conn, steam_id, e)
+            return self._redirect("/me")
+        form = self._form()
+        url = notify.check_url(form.get("url", ""))
+        kinds = [k for k in notify.KINDS if form.get(k)]
+        if url and kinds:
+            store.subscribe(conn, steam_id, url, kinds, time.time())
+        elif url:
+            # Asking for nothing is asking to be left alone.
+            store.unsubscribe(conn, steam_id)
+        return self._redirect("/me" + ("" if url else "?webhook=rejected"))
 
     def _me_post(self, path):
         user = current_user(self.headers)
@@ -2294,7 +2429,9 @@ class Handler(BaseHTTPRequestHandler):
             rows = store.characters(db(), user["steam_id"])
             stats = (me_stats(h, now, [c["name"] for c in rows if not c["hidden"]],
                               user["character"]) if user["character"] else None)
-            self._send(200, render_me(user, mine, rows, stats),
+            self._send(200, render_me(user, mine, rows, stats,
+                                      store.subscription(db(), user["steam_id"]),
+                                      "webhook=rejected" in (query or "")),
                        "text/html; charset=utf-8")
         elif path in ("/", "/index.html"):
             user = current_user(self.headers)

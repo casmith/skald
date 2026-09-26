@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- **Tell me about it.** Sign in, paste a Discord webhook, and Skald posts
+  when someone comes online or a boss falls. No bot, no gateway, no
+  dependency — one POST of one JSON field, from the poller that was already
+  watching.
+- **Only Discord webhook URLs are accepted.** Letting a signed-in visitor
+  choose where the server sends a request is a forgery hole by
+  construction: without the restriction, anyone with a Steam account could
+  point Skald at a machine behind its firewall and use it as a prod.
+- Nothing announces a backlog. The first tick after a restart only records
+  what is true; a subscription made today does not replay the week.
+- You are never told that you have arrived — a subscriber's own claimed
+  characters are skipped.
+- A webhook deleted in Discord answers 404 for ever, so failures are
+  counted and the subscription switches itself off after ten rather than
+  posting into the void every minute. The error shows on `/me`.
+
 ## 0.5.1
 
 - **A server log kept in the events directory was read twice.** That is the
