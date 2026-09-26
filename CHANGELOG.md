@@ -16,6 +16,25 @@
 - This is what made keeping the whole server log worth anything. Without it
   the promise — that a new pattern is a Skald upgrade and nothing else — was
   not true.
+- **The map upload could not read a real character file.** It was written
+  from a published description of version 33; files written today say
+  version 46, and the layout moved. Every real upload was refused. Fixed,
+  and checked against actual files for the first time.
+- The parser no longer walks the file to the map — it **finds** it. The
+  explored bitmap is unmistakable (edge × edge bytes, every one 0 or 1, four
+  megabytes of it for a 2048-square map), and everything needed is read from
+  around it. The fields in front of it have already been rearranged once;
+  the bitmap is the one part whose shape is fixed by what it is. Version 33
+  files still read, which is the point.
+- Two corrections that came from real data: the map is a **length-prefixed
+  byte array**, not inline fields; and an **optional point that is not set
+  still occupies its twelve bytes**, zeroed. Assuming otherwise put the
+  world id in the wrong place and read two of three worlds as id 0 — and
+  since the id is the key a map is stored under, they would have overwritten
+  each other.
+- Character files are commonly **not** under `AppData`: with cloud saves
+  they live in Steam's `userdata/<id>/892970/remote/characters`. Both paths
+  are now given on the upload form and in the docs.
 
 ## 0.6.0
 
