@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.8.0
+
+- **Real terrain, generated from the world seed.** Valheim stores no
+  terrain — it regenerates it from one integer, which is why a
+  ten-kilometre world fits in a few megabytes — so the only way to draw a
+  map is to do the same arithmetic. Skald now does: the biome half of the
+  world generator, ported, with the explored mask laid over it.
+- The map is no longer a silhouette. Explored ground shows in its own
+  colours, with the rest of the world faint behind it, so a coastline is a
+  coastline and a swamp is a swamp.
+- **Zoom and pan**, wheel or buttons, zooming about the pointer rather than
+  the corner.
+- Three things had to be exactly right and are checked as such: Unity's
+  Perlin noise (Ken Perlin's 2002 noise with `abs()` inputs and a
+  `(raw + 0.69) / 1.483` rescale), Unity's random number generator, and the
+  order the world's offsets are drawn in — offsets 0..3, two seeds, then
+  offset 4 **last**. Any other order gives a different world that looks
+  perfectly reasonable.
+- Validated against 2,213 real landmark placements from a live server:
+  every one fell in the biome that landmark can spawn in, and **none** in
+  the sea. The seed hash was separately confirmed against three real world
+  files.
+- Drawn once per seed, about a minute, then kept on disk beside the
+  database. Terrain cannot change, so it never needs doing again.
+- Reads the newer `.fwl2` world metadata as well as `.fwl`.
+
 ## 0.7.1
 
 - **A line is no longer counted twice because something quoted it.** The log

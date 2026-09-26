@@ -441,3 +441,22 @@ def _world_map_in(path):
             if best is None or seen > best["seen"]:
                 best = {"edge": edge, "explored": packed, "seen": seen}
     return best
+
+
+def world_meta(fwl):
+    """A world's name, seed and id, from its .fwl.
+
+    The seed is the whole world: Valheim stores no terrain, it regenerates
+    it from this number, so having it means being able to draw the map.
+    """
+    r = Reader(fwl)
+    size = r.i32()
+    if size <= 0 or size > len(fwl):
+        raise Bad("not a world metadata file")
+    r = Reader(r.take(size))
+    version = r.i32()
+    name = r.string()
+    seed_name = r.string()
+    seed = r.i32()
+    return {"version": version, "name": name, "seed_name": seed_name,
+            "seed": seed, "uid": r.i64()}

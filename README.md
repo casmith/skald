@@ -71,9 +71,9 @@ server](#trying-it-without-a-server).)*
   boss falls. Nothing changes for people who do not sign in.
   yours, greets you by the one you play most, and gives you a page of your
   own numbers. Nothing changes for people who do not sign in.
-- **A group map**, from the world's own cartography table — everything
-  anyone has shared to it, with nothing to upload and nothing leaving your
-  server. A character file works too, for worlds with no table.
+- **A group map on real terrain** — the world drawn from its own seed, with
+  everything the cartography table has shared laid over it, and nothing to
+  upload. A character file works too, for worlds with no table.
 - JSON for all of it, if you would rather build your own view.
 
 ## How it knows
