@@ -817,7 +817,8 @@ def scan_saves():
 def milestone_poller():
     n = 0
     while True:
-        for scan, due in ((scan_saves, True), (scan_backups, n % BACKUP_SCAN_EVERY == 0)):
+        for scan, due in ((scan_saves, True), (refresh_world_maps, True),
+                          (scan_backups, n % BACKUP_SCAN_EVERY == 0)):
             if due:
                 try:
                     scan()
@@ -1334,6 +1335,31 @@ def world_names_by_uid():
         except (OSError, fch.Bad, struct.error):
             continue
     return out
+
+
+# world -> its shared map, and a per-world cache of which file it came from
+# so an unchanged save is not decompressed again every minute.
+WORLD_MAPS = {}
+_CARTO_FILES = {}
+
+
+def refresh_world_maps():
+    """Read each world's cartography table from its own save.
+
+    This is the group's map, kept by the game: everything anyone who used a
+    table has contributed. It needs no upload, no character file and no
+    account -- Skald already mounts these saves to read the world clock.
+    """
+    for world in sorted(SERVERS):
+        directory = os.path.join(SAVES_ROOT, world, "worlds_local", world)
+        cache = _CARTO_FILES.setdefault(world, {})
+        try:
+            found = fch.world_map(directory, cache)
+        except Exception as e:                     # a save mid-write, say
+            print(f"world map for {world}: {e}", flush=True)
+            continue
+        if found:
+            WORLD_MAPS[world] = found
 
 
 def merged_map(world_uid):
@@ -2382,31 +2408,53 @@ __MAPS__
 </body></html>"""
 
 
-def render_map(names, mapped, requested):
-    """The group's map: everyone's fog of war, added together."""
-    rows = sorted(mapped, key=lambda m: -m["newest"])
-    if not rows:
+def render_map(names, mapped, requested, shared=None):
+    """The group's map.
+
+    Two sources, and the first is far the better one. A world's own save
+    holds its cartography table: everything anyone who used one contributed,
+    kept by the game, needing nothing from anybody. Uploaded characters fill
+    in worlds that have no table, or that nobody has shared to it.
+    """
+    shared = shared or {}
+    entries = [{"key": world, "label": world, "n": None,
+                "seen": m["seen"], "edge": m["edge"], "table": True}
+               for world, m in sorted(shared.items())]
+    entries += [{"key": str(m["world_uid"]),
+                 "label": names.get(m["world_uid"], str(m["world_uid"])),
+                 "n": m["people"], "seen": None, "edge": m["edge"],
+                 "table": False}
+                for m in sorted(mapped, key=lambda m: -m["newest"])]
+    if not entries:
         return MAP_PAGE.replace("__TABS__", "").replace("__BODY__",
-            '<p class="empty">Nobody has uploaded a character yet. Sign in, open '
-            '<a href="/me">your page</a>, and add the character file for a world '
-            'you have explored.</p>')
-    pick = next((m for m in rows if str(m["world_uid"]) == requested), rows[0])
+            '<p class="empty">No world has a shared map yet. A cartography '
+            'table in any world Skald watches gives one automatically &mdash; '
+            'or sign in, open <a href="/me">your page</a>, and upload a '
+            'character file.</p>')
+    pick = next((e for e in entries if e["key"] == requested), entries[0])
     tabs = "".join(
-        f'<a class="tab{" on" if m is pick else ""}"'
-        f' href="/map?world={m["world_uid"]}">'
-        f'{html.escape(names.get(m["world_uid"], str(m["world_uid"])))}'
-        f' <span class="n">{m["people"]}</span></a>'
-        for m in rows)
-    merged = merged_map(pick["world_uid"])
-    share = merged["seen"] / (merged["edge"] ** 2) * 100 if merged else 0
-    name = html.escape(names.get(pick["world_uid"], str(pick["world_uid"])))
-    body = (f'<p class="facts"><b>{name}</b> &middot; '
-            f'{merged["people"]} character{"" if merged["people"] == 1 else "s"} '
-            f'merged &middot; {share:.1f}% of the map seen &middot; '
-            f'{len(merged["pins"])} pins</p>'
-            f'<img class="map" src="/map.png?world={pick["world_uid"]}" '
-            f'alt="Explored map of {name}" width="{merged["edge"]}" '
-            f'height="{merged["edge"]}">')
+        f'<a class="tab{" on" if e is pick else ""}" href="/map?world={e["key"]}">'
+        f'{html.escape(e["label"])}'
+        + (f' <span class="n">{e["n"]}</span>' if e["n"] else "")
+        + "</a>"
+        for e in entries)
+
+    if pick["table"]:
+        seen, edge = pick["seen"], pick["edge"]
+        where = ("from this world&rsquo;s cartography table &mdash; everything "
+                 "anyone has shared to it")
+    else:
+        merged = merged_map(int(pick["key"]))
+        seen, edge = merged["seen"], merged["edge"]
+        people = merged["people"]
+        where = (f'{people} uploaded character{"" if people == 1 else "s"}, '
+                 f'merged &middot; {len(merged["pins"])} pins')
+    share = seen / (edge ** 2) * 100 if edge else 0
+    label = html.escape(pick["label"])
+    body = (f'<p class="facts"><b>{label}</b> &middot; {share:.2f}% of the map '
+            f'seen &middot; {where}</p>'
+            f'<img class="map" src="/map.png?world={pick["key"]}" '
+            f'alt="Explored map of {label}" width="{edge}" height="{edge}">')
     return MAP_PAGE.replace("__TABS__", tabs).replace("__BODY__", body)
 
 
@@ -2439,9 +2487,11 @@ MAP_PAGE = """<!doctype html>
  <a href="/">back to the dashboard</a> &middot; <a href="/me">add yours</a></p>
 <nav class="tabs">__TABS__</nav>
 __BODY__
-<p class="muted" style="font-size:.85rem">Only the explored mask and the pins are kept
- from an uploaded character. Nothing else in the file is parsed, so there is nothing
- else to store: no inventory, no skills, no name.</p>
+<p class="muted" style="font-size:.85rem">A world&rsquo;s map comes from its own
+ cartography table, read from the save Skald already has: nothing is uploaded and nothing
+ leaves the server. For a world without a table, an uploaded character works too &mdash;
+ only its explored mask and pins are kept, because nothing else in the file is ever
+ parsed.</p>
 </body></html>"""
 
 
@@ -2751,8 +2801,16 @@ class Handler(BaseHTTPRequestHandler):
         # uid from a character file, not one of Skald's world names, and
         # pick_world would turn it into a 404.
         if path == "/map.png":
-            uid = params.get("world", [""])[0]
-            merged = merged_map(int(uid)) if uid.lstrip("-").isdigit() else None
+            want = params.get("world", [""])[0]
+            # A world's own name means its cartography table; a number means
+            # a map somebody uploaded, which is keyed by the world's id.
+            shared = WORLD_MAPS.get(want)
+            if shared:
+                merged = {"bits": shared["explored"], "edge": shared["edge"]}
+            elif want.lstrip("-").isdigit():
+                merged = merged_map(int(want))
+            else:
+                merged = None
             if not merged:
                 return self._send(404, "no map for that world", "text/plain")
             body = fch.png(merged["bits"], merged["edge"])
@@ -2765,7 +2823,8 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/map":
             return self._send(200, render_map(world_names_by_uid(),
                                               store.mapped_worlds(db()),
-                                              params.get("world", [""])[0]),
+                                              params.get("world", [""])[0],
+                                              dict(WORLD_MAPS)),
                               "text/html; charset=utf-8")
 
         now = time.time()

@@ -71,9 +71,9 @@ server](#trying-it-without-a-server).)*
   boss falls. Nothing changes for people who do not sign in.
   yours, greets you by the one you play most, and gives you a page of your
   own numbers. Nothing changes for people who do not sign in.
-- **A group map** — upload a character file and Skald keeps the fog of war
-  and the pins, merged with everyone else's. Nothing else in the file is
-  decoded.
+- **A group map**, from the world's own cartography table — everything
+  anyone has shared to it, with nothing to upload and nothing leaving your
+  server. A character file works too, for worlds with no table.
 - JSON for all of it, if you would rather build your own view.
 
 ## How it knows
