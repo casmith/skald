@@ -8,7 +8,7 @@ It reads what the server already writes — its log and its world saves — and
 serves a single page. No mods, no plugins, nothing installed in the game, and
 nothing written back to your world.
 
-> **v0.5** — the first release worth sharing, and then some. Running daily on the homelab it
+> **v0.6** — the first release worth sharing, and then some. Running daily on the homelab it
 > grew up in, and installed from scratch on a clean machine to make sure the
 > instructions below are true. See the [roadmap](ROADMAP.md) for what is next
 > and the [limitations](docs/limitations.md) for what it cannot do.

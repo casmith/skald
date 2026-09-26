@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.6.0
 
 - **Raid history.** The server logs every raid as it starts, with an exact
   time — `Random event set:army_bonemass` — so the dashboard now lists what
