@@ -31,6 +31,7 @@ Layout, for anyone checking this against a file:
         i32   pin count, then per pin: string name, 3 floats, i32 type, u8 crossed
         u8    position shared publicly
 """
+import re
 import struct
 
 MAX_EDGE = 4096          # 2048 today; a sanity bound, not a prediction
@@ -79,58 +80,129 @@ class Reader:
         return self.take(n).decode("utf-8", "replace")
 
 
+# uid, then three points that are always thirteen bytes whether they
+# hold anything or not, then the home point, then the map flag.
+UID_BACK = 8 + 3 * 13 + 12
+
+MIN_EDGE = 16            # smaller than any real map; the structure does the work
+MAP_RUN = re.compile(rb"[\x00\x01]{%d,}" % (MIN_EDGE * MIN_EDGE))
+
+
 def parse(blob):
     """The worlds in a character file: uid, explored bitmap, pins.
 
-    Returns [{uid, edge, explored (bytes, one byte per pixel), pins}].
-    Raises Bad with something worth showing a person.
+    Rather than walk the file field by field, this *finds* each map. The
+    explored bitmap is a wholly unmistakable object -- edge*edge bytes, every
+    one of them 0 or 1, four megabytes of it for a 2048-square map -- and it
+    is preceded by five bytes that say so. Everything needed comes from
+    around it.
+
+    That is deliberate. The fields before the map have already been
+    rearranged once: a character file written today says version 46, the
+    published layout describes version 33, and walking it by the old
+    description finds nonsense. The bitmap has not moved and is not going to:
+    it is the one part of the file whose shape is fixed by what it is.
+
+    Returns [{uid, edge, explored, pins}], raising Bad only when the file is
+    not a character file at all. A character with no map data is not an
+    error -- it is a character who has not been anywhere.
     """
     outer = Reader(blob)
     size = outer.i32()
     if size <= 0 or size > len(blob):
         raise Bad("this does not look like a Valheim character file")
-    r = Reader(outer.take(size))
-
-    version = r.i32()
+    data = outer.take(size)
+    version = Reader(data).i32()
     if not 0 < version < 1000:
         raise Bad(f"unexpected character file version {version}")
-    for _ in range(4):        # kills, deaths, crafts, builds
-        r.i32()
 
-    count = r.i32()
-    if not 0 <= count <= MAX_WORLDS:
-        raise Bad("the world list is not a world list")
     worlds = []
-    for _ in range(count):
-        uid = r.i64()
-        for _ in range(3):    # spawn, logout, death: each optional
-            if r.u8():
-                r.f32x3()
-        r.f32x3()             # home point, always there
-        if not r.u8():
-            continue          # a world visited with no map data yet
-        map_version = r.i32()
-        edge = r.i32()
-        if not 0 < edge <= MAX_EDGE:
-            raise Bad(f"a map {edge} pixels across is not one we can read")
-        explored = r.take(edge * edge)
-        pins = []
-        pin_count = r.i32()
-        if not 0 <= pin_count <= MAX_PINS:
-            raise Bad("the pin list is not a pin list")
-        for _ in range(pin_count):
-            name = r.string()
-            x, y, z = r.f32x3()
-            kind = r.i32()
-            crossed = bool(r.u8())
-            pins.append({"name": name, "x": x, "z": z, "type": kind,
-                         "crossed": crossed})
-        r.u8()                # position shared publicly: not ours to keep
-        worlds.append({"uid": uid, "edge": edge, "explored": explored,
-                       "pins": pins, "map_version": map_version})
+    for run in MAP_RUN.finditer(data):
+        found = _map_at(data, run.start(), run.end())
+        if found:
+            worlds.append(found)
+    if len(worlds) > MAX_WORLDS:
+        raise Bad("that file claims more worlds than anyone has")
     return {"version": version, "worlds": worlds}
 
 
+def _map_at(data, run_start, run_end):
+    """Read one map, if a run of 0/1 bytes really is one.
+
+    The bitmap's first bytes may be indistinguishable from the tail of the
+    integer that gives its size, so the exact start is searched for within a
+    few bytes rather than assumed.
+    """
+    for start in range(max(9, run_start), min(run_start + 12, run_end)):
+        edge = struct.unpack_from("<i", data, start - 4)[0]
+        if not MIN_EDGE <= edge <= MAX_EDGE:
+            continue
+        if run_end - start < edge * edge:
+            continue
+        map_version = struct.unpack_from("<i", data, start - 8)[0]
+        if not 0 < map_version < 100:
+            continue
+        # Two shapes have been seen for what sits in front of the map. In
+        # the older one the "there is a map" flag butts straight up against
+        # the version; in the newer the map is a byte array, so its length
+        # comes between them. Accept either: which one a file uses is the
+        # game's business, and the next version may invent a third.
+        flag_at = None
+        if data[start - 9] == 1:
+            flag_at = start - 9
+        else:
+            length = struct.unpack_from("<i", data, start - 12)[0]
+            if length >= edge * edge and data[start - 13] == 1:
+                flag_at = start - 13
+        if flag_at is None:
+            continue
+        r = Reader(data)
+        r.i = start + edge * edge
+        try:
+            pin_count = r.i32()
+            if not 0 <= pin_count <= MAX_PINS:
+                continue
+            pins = []
+            for _ in range(pin_count):
+                name = r.string()
+                x, _y, z = r.f32x3()
+                kind = r.i32()
+                crossed = bool(r.u8())
+                pins.append({"name": name, "x": x, "z": z, "type": kind,
+                             "crossed": crossed})
+        except Bad:
+            continue
+        return {"uid": _uid_before(data, flag_at), "edge": edge,
+                "explored": data[start:start + edge * edge], "pins": pins,
+                "map_version": map_version}
+    return None
+
+
+def _uid_before(data, flag_at):
+    """The world's id, read backwards from the map-data flag.
+
+    Between the two sit the home point and three optional ones -- and an
+    absent optional point still occupies its twelve bytes, zeroed, rather
+    than collapsing to its flag. So the distance back is fixed:
+
+        i64 uid | 3 x (u8 present + 12 bytes) | 12 bytes home | u8 has map
+
+    Worth stating because assuming the other thing -- that an absent point
+    takes one byte -- reads two of three worlds as id 0, and id is the key
+    a map is stored under, so they would overwrite each other.
+
+    The three flags are checked rather than trusted. A file that does not
+    look like this gives 0, and a map with no id is better than two worlds
+    quietly merged into one.
+    """
+    uid_at = flag_at - UID_BACK
+    if uid_at < 0:
+        return 0
+    for n in range(3):
+        if data[uid_at + 8 + n * 13] not in (0, 1):
+            return 0
+    uid = struct.unpack_from("<q", data, uid_at)[0]
+    return uid if abs(uid) < 2 ** 62 else 0
 def pack(explored):
     """One byte per pixel down to one bit. A quarter of a megabyte, not two."""
     out = bytearray((len(explored) + 7) // 8)

@@ -79,6 +79,19 @@ in as anyone.
 
 Nothing about the dashboard changes for people who do not sign in.
 
+### Your map
+
+Character files are wherever Valheim keeps yours:
+
+| | |
+|---|---|
+| Windows | `%USERPROFILE%\\AppData\\LocalLow\\IronGate\\Valheim\\characters` |
+| Linux | `~/.config/unity3d/IronGate/Valheim/characters` |
+| Steam Cloud, either | `…/Steam/userdata/<id>/892970/remote/characters` |
+
+If the game saves to the cloud, the last one is the live copy and the others
+may be years stale — worth checking the dates.
+
 ### Your page
 
 `/me` is the one page that is yours. It shows your playtime over the usual

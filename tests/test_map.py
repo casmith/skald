@@ -19,7 +19,7 @@ T = 1_800_000_000
 UID = 8_675_309
 
 
-def world(uid=UID, edge=16, fill=None, pins=()):
+def world(uid=UID, edge=32, fill=None, pins=()):
     explored = fill if fill is not None else [1] * (edge * edge // 2) + [0] * (edge * edge // 2)
     return {"uid": uid, "edge": edge, "explored": explored, "pins": list(pins)}
 
@@ -28,10 +28,10 @@ def world(uid=UID, edge=16, fill=None, pins=()):
 
 def test_a_character_file_gives_up_its_worlds():
     got = fch.parse(mkfch.character([world()]))
-    assert got["version"] == 33
+    assert got["version"] == 46
     (w,) = got["worlds"]
-    assert w["uid"] == UID and w["edge"] == 16
-    assert sum(1 for b in w["explored"] if b) == 128
+    assert w["uid"] == UID and w["edge"] == 32
+    assert sum(1 for b in w["explored"] if b) == 32 * 32 // 2
 
 
 def test_pins_come_through():
@@ -69,26 +69,32 @@ def test_a_truncated_file_is_refused():
         fch.parse(blob[:len(blob) // 2])
 
 
-def test_an_absurd_map_size_is_refused():
-    """A hostile file should not be able to ask for a gigabyte."""
-    d = struct.pack("<i", 33) + struct.pack("<4i", 0, 0, 0, 0)
-    d += struct.pack("<i", 1) + struct.pack("<q", 1) + b"\x00\x00\x00"
+def test_an_absurd_map_size_is_not_read_as_a_map():
+    """A hostile file must not be able to ask for a gigabyte.
+
+    Finding the map by its shape changes what "refused" means here: a size
+    nothing could satisfy simply fails to match, so the file parses with no
+    worlds in it rather than raising. Either is safe; nothing is allocated
+    on the strength of a number in the file.
+    """
+    d = struct.pack("<i", 46) + struct.pack("<4i", 0, 0, 0, 0)
+    d += struct.pack("<i", 1) + struct.pack("<q", 1) + bytes(39)
     d += struct.pack("<3f", 0, 0, 0) + b"\x01"
-    d += struct.pack("<i", 4) + struct.pack("<i", 1 << 20)   # a million a side
+    d += struct.pack("<i", 4) + struct.pack("<i", 1 << 20)     # a million a side
+    d += bytes(4096)
     blob = struct.pack("<i", len(d)) + d
-    with pytest.raises(fch.Bad, match="pixels across"):
-        fch.parse(blob)
+    assert fch.parse(blob)["worlds"] == []
 
 
-def test_an_absurd_pin_count_is_refused():
-    d = struct.pack("<i", 33) + struct.pack("<4i", 0, 0, 0, 0)
-    d += struct.pack("<i", 1) + struct.pack("<q", 1) + b"\x00\x00\x00"
-    d += struct.pack("<3f", 0, 0, 0) + b"\x01"
-    d += struct.pack("<i", 4) + struct.pack("<i", 4) + bytes(16)
-    d += struct.pack("<i", 1 << 30)
+def test_an_absurd_pin_count_is_not_read_as_a_map():
+    edge = 32
+    body = struct.pack("<i", 4) + struct.pack("<i", edge) + bytes(edge * edge)
+    body += struct.pack("<i", 1 << 30)                          # a billion pins
+    d = struct.pack("<i", 46) + struct.pack("<4i", 0, 0, 0, 0)
+    d += struct.pack("<i", 1) + struct.pack("<q", 1) + bytes(39)
+    d += struct.pack("<3f", 0, 0, 0) + b"\x01" + struct.pack("<i", len(body)) + body
     blob = struct.pack("<i", len(d)) + d
-    with pytest.raises(fch.Bad, match="pin list"):
-        fch.parse(blob)
+    assert fch.parse(blob)["worlds"] == []
 
 
 # --- packing and merging -----------------------------------------------
@@ -167,3 +173,52 @@ def test_removing_your_map_removes_only_yours(tracker):
         store.put_map(app.db(), who, UID, 8, zlib.compress(fch.pack([1] * 8)), [], 8, T)
     store.drop_map(app.db(), STEAM[ALFR], UID)
     assert [r["steam_id"] for r in store.maps_for(app.db(), UID)] == [STEAM["Bera"]]
+
+
+# --- shapes taken from real character files ------------------------------
+#
+# The parser was first written from a published description of version 33
+# and refused every real file, which are version 46. These encode what an
+# actual file turned out to look like, so that particular mistake cannot be
+# made twice. No real file is in this repository; the shapes are.
+
+def test_the_layout_a_real_file_uses():
+    """Version 46: the map is a length-prefixed byte array."""
+    blob = mkfch.character([world(uid=5097231993, edge=64)])
+    got = fch.parse(blob)
+    assert got["version"] == 46
+    assert [w["uid"] for w in got["worlds"]] == [5097231993]
+
+
+def test_the_older_layout_still_reads():
+    """Finding the map by its shape rather than by walking to it means the
+    version 33 arrangement -- no length in front of the map -- still works."""
+    blob = mkfch.character([world(uid=42, edge=64)], version=33, legacy_map=True)
+    got = fch.parse(blob)
+    assert [w["uid"] for w in got["worlds"]] == [42]
+
+
+def test_an_absent_point_still_occupies_its_bytes():
+    """The mistake that read two of three real worlds as id 0.
+
+    An optional point that is not set still takes its twelve bytes, zeroed.
+    Assuming it collapses to a single flag byte puts the id in the wrong
+    place -- and since the id is the key a map is stored under, two worlds
+    become one and overwrite each other.
+    """
+    blob = mkfch.character([
+        world(uid=1001218399, edge=64),                                  # no points
+        world(uid=3289189326, edge=64, pins=[]),                         # no points
+        dict(world(uid=5097231993, edge=64), spawn=(1.0, 2.0, 3.0),
+             logout=(4.0, 5.0, 6.0), death=(7.0, 8.0, 9.0)),             # all three
+    ])
+    uids = [w["uid"] for w in fch.parse(blob)["worlds"]]
+    assert uids == [1001218399, 3289189326, 5097231993]
+    assert len(set(uids)) == 3, "two worlds must never share an id"
+
+
+def test_a_character_who_has_been_nowhere_is_not_an_error():
+    """Real files exist with no map data at all -- a small one was the first
+    thing this was tried on."""
+    blob = mkfch.character([{"uid": 7}, {"uid": 8}])
+    assert fch.parse(blob) == {"version": 46, "worlds": []}
