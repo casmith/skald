@@ -882,7 +882,11 @@ def milestones(h):
             out.append({"world": world, "key": key, "label": label, "kind": kind,
                         "earliest": lo, "latest": hi, "source": source,
                         "fight_seconds": fight, "online": online})
-    return sorted(out, key=lambda m: m["latest"])
+    # Newest first, like /api/sessions and /api/deaths: the thing you just
+    # did is the thing you came to look at. `earliest` breaks ties, which
+    # are common -- everything found in one backup scan shares a `latest`.
+    return sorted(out, key=lambda m: (m["latest"], m["earliest"] or 0),
+                  reverse=True)
 
 
 def overlap(s, lo, hi):

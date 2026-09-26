@@ -130,3 +130,29 @@ def test_a_save_format_skald_has_not_seen_is_read_anyway(tracker, capsys):
     assert state["save"]["version"] == 99
     assert state["save"]["world_time"] == 4242.0   # still usable
     assert EIKTHYR in state["live"]
+
+
+def test_newest_first(tracker):
+    """The kill you just made is the one you came to look at -- and the same
+    way round as /api/sessions and /api/deaths, which are newest first too."""
+    tracker.write_save(1, [EIKTHYR], T)
+    app.scan_saves()
+    tracker.write_save(2, [EIKTHYR, ELDER], T + 1800)
+    app.scan_saves()
+    tracker.write_save(3, [EIKTHYR, ELDER, "killedtroll"], T + 3600)
+    app.scan_saves()
+    got = app.milestones({"sessions": [], "keys": [], "spawns": []})
+    assert [m["key"] for m in got] == ["killedtroll", ELDER, EIKTHYR]
+
+
+def test_keys_found_together_keep_a_stable_order(tracker):
+    """Everything in a baseline save shares one `latest`, so the tie-break
+    has to be deterministic -- otherwise the table reshuffles itself on
+    every refresh."""
+    tracker.write_save(1, [EIKTHYR, ELDER, "killedtroll"], T)
+    app.scan_saves()
+    first = [m["key"] for m in app.milestones({"sessions": [], "keys": [], "spawns": []})]
+    for _ in range(5):
+        again = [m["key"] for m in app.milestones({"sessions": [], "keys": [],
+                                                   "spawns": []})]
+        assert again == first

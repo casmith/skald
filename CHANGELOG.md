@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 0.5.2
+
+- **Milestones are newest first**, on the page and in `/api/milestones`.
+  They were the only list in Skald running the other way — `/api/sessions`
+  and `/api/deaths` have always been newest first — so the kill you just
+  made was at the bottom of the table.
+- Keys found in the same scan share a timestamp, so the tie is broken
+  deterministically and the table no longer reshuffles between refreshes.
+
 ## 0.5.1
 
 - **A server log kept in the events directory was read twice.** That is the
