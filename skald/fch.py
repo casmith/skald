@@ -31,8 +31,11 @@ Layout, for anyone checking this against a file:
         i32   pin count, then per pin: string name, 3 floats, i32 type, u8 crossed
         u8    position shared publicly
 """
+import math
+import os
 import re
 import struct
+import zlib
 
 MAX_EDGE = 4096          # 2048 today; a sanity bound, not a prediction
 MAX_WORLDS = 128
@@ -269,3 +272,87 @@ def world_uid(fwl):
     r.string()                   # seed name
     r.i32()                      # seed
     return r.i64(), name
+
+
+# --- the cartography table, read from the world itself --------------------
+#
+# A world's own save holds the shared map: what everyone who used a
+# cartography table has contributed. That is the group map, kept by the
+# game, already on the server Skald is watching -- no upload, no character
+# file, nothing that leaves the machine.
+#
+# It lives compressed inside one of the world's chunk files, and the bitmap
+# is found the same way as in a character: a run of edge*edge bytes that are
+# every one 0 or 1 is not anything else.
+
+# Defined here as well as beside the character reader; if both land, one
+# of these goes.
+GZIP = re.compile(rb"\x1f\x8b\x08")
+
+# The smallest grid worth believing is a map. Note there is deliberately no
+# floor on the *file* size: a world nobody has explored is four megabytes of
+# zeroes, which deflates to almost nothing, and skipping small files would
+# skip exactly the worlds whose map has only just started.
+WORLD_MAP_MIN = 256
+
+
+def world_map(directory, cache=None):
+    """The shared map for a world, from its save directory.
+
+    Returns {"edge", "explored", "seen", "path", "mtime"} or None. `cache`
+    is an optional dict: a file whose size and mtime have not changed is not
+    read again, because this means decompressing four megabytes and a world
+    saves every half hour.
+    """
+    best = None
+    try:
+        names = sorted(os.listdir(directory))
+    except OSError:
+        return None
+    for name in names:
+        path = os.path.join(directory, name)
+        try:
+            st = os.stat(path)
+        except OSError:
+            continue
+        if not os.path.isfile(path):
+            continue
+        key = (path, st.st_size, st.st_mtime)
+        if cache is not None and key in cache:
+            found = cache[key]
+        else:
+            found = _world_map_in(path)
+            if cache is not None:
+                cache.clear()          # one world, one map: do not grow
+                cache[key] = found
+        if found and (best is None or found["seen"] > best["seen"]):
+            best = dict(found, path=path, mtime=st.st_mtime)
+    return best
+
+
+def _world_map_in(path):
+    """The biggest explored bitmap inside one save file, if there is one."""
+    try:
+        with open(path, "rb") as f:
+            blob = f.read()
+    except OSError:
+        return None
+    best = None
+    for m in GZIP.finditer(blob):
+        try:
+            raw = zlib.decompress(blob[m.start():], 31)
+        except zlib.error:
+            continue
+        if len(raw) < WORLD_MAP_MIN ** 2:
+            continue
+        for run in MAP_RUN.finditer(raw):
+            length = run.end() - run.start()
+            edge = math.isqrt(length)
+            if edge < WORLD_MAP_MIN or edge > MAX_EDGE:
+                continue
+            explored = raw[run.start():run.start() + edge * edge]
+            packed = pack(explored)
+            seen = sum(bin(b).count("1") for b in packed)
+            if best is None or seen > best["seen"]:
+                best = {"edge": edge, "explored": packed, "seen": seen}
+    return best
