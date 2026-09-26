@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+- **Four milestone keys named**, taken from the game's own asset bundles:
+  `defeated_frozenking`, `defeated_frozenking_p3`, `defeated_hive` and
+  `killed_frysling`. All Deep North, which is unfinished — so nobody can set
+  them yet, and that is exactly why they are worth naming before anyone can.
+  The list came from every Character prefab's `m_defeatSetGlobalKey`, which
+  is where these live: they are not in the code, which is why
+  `defeated_writhan` was in our worlds and nowhere in the assembly.
+- They are deliberately **not** kind `boss`, however much FrozenKing looks
+  like one. The badge row is driven by `BOSSES`, and a `boss` missing from
+  that list is filtered out of the table *and* absent from the badges — it
+  would disappear entirely. A test now enforces that invariant.
+- **`bosshildir1`–`3` marked unverified.** Unlike every other key, they
+  appear in neither the assembly nor any prefab, and no world of ours has
+  one. Kept, since a key that never arrives shows nothing, but no longer
+  presented as evidence.
+- Generated labels no longer contain a double space (`killed_seekerbrood`
+  read as "First  seekerbrood killed"), and a key that is nothing but a
+  prefix no longer renders with a leading one.
+
 ## 0.5.1
 
 - **A server log kept in the events directory was read twice.** That is the

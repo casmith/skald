@@ -140,8 +140,12 @@ MILESTONES = {
     "defeated_goblinking": ("Yagluth defeated", "boss"),
     "defeated_queen": ("The Queen defeated", "boss"),
     "defeated_fader": ("Fader defeated", "boss"),
-    # The mini-bosses of Hildir's quests, in quest order. Lord Reto's key is
-    # not known here; it will show with a generated label.
+    # The mini-bosses of Hildir's quests, in quest order. UNVERIFIED: unlike
+    # every other key here these appear in neither the assembly's literals
+    # nor any prefab's m_defeatSetGlobalKey, and no world of ours has one.
+    # They may be set by quest logic through some other route, or the names
+    # may simply be wrong. Harmless either way -- a key that never arrives
+    # shows nothing -- but do not treat them as evidence.
     "bosshildir1": ("Brenna defeated (Hildir's first chest)", "mini-boss"),
     "bosshildir2": ("Geirrhafa defeated (Hildir's second chest)", "mini-boss"),
     "bosshildir3": ("Zil & Thungr defeated (Hildir's third chest)", "mini-boss"),
@@ -152,6 +156,20 @@ MILESTONES = {
     "killedtroll": ("First troll killed", "first"),
     "killedbat": ("First bat killed", "first"),
     "killed_surtling": ("First surtling killed", "first"),
+    # Deep North, which is not finished: these four came out of the game's
+    # own asset bundles (every Character prefab's m_defeatSetGlobalKey), so
+    # they are real keys nobody can set yet. Naming them now costs nothing
+    # and means the day that update ships, a kill reads as itself instead of
+    # as "Defeated_frozenking".
+    #
+    # Deliberately not kind "boss", however much FrozenKing looks like one:
+    # the badge row is driven by BOSSES, and a "boss" that is not in that
+    # list is filtered out of the table *and* absent from the badges, so it
+    # would vanish entirely. Revisit both when Deep North lands.
+    "defeated_frozenking": ("The Frozen King defeated", "rare"),
+    "defeated_frozenking_p3": ("The Frozen King's last phase", "rare"),
+    "defeated_hive": ("Hive defeated", "rare"),
+    "killed_frysling": ("First frysling killed", "first"),
 }
 # The main bosses in progression order: shown as achievement badges, locked
 # and nameless until beaten. Everything else in MILESTONES is listed plainly.
@@ -825,10 +843,27 @@ def biome_glyph(biome):
 
 
 def milestone_label(key):
-    return MILESTONES.get(key) or (
-        key.replace("defeated_", "").replace("killed", "first ").replace("_", " ")
-        .strip().capitalize() + (" defeated" if key.startswith("defeated") else " killed"),
-        "other")
+    """A name for a key Skald has never heard of.
+
+    Valheim can add a creature without telling us, and an unstyled label is
+    a great deal better than a blank. `killed_surtling` and `killedbat` are
+    both real spellings, so the separator is optional throughout -- which is
+    where the old version left a double space.
+    """
+    known = MILESTONES.get(key)
+    if known:
+        return known
+    body = " ".join(re.sub(r"^(?:defeated|killed)_?", "", key)
+                    .replace("_", " ").split())
+    if not body:
+        # The prefix was the whole key. Nothing to name it after, so say
+        # what we were given rather than " defeated".
+        return (" ".join(key.replace("_", " ").split()).capitalize(), "other")
+    if key.startswith("defeated"):
+        return (f"{body.capitalize()} defeated", "other")
+    if key.startswith("killed"):
+        return (f"First {body} killed", "other")
+    return (f"{body.capitalize()} killed", "other")
 
 
 def milestones(h):
