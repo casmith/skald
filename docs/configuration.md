@@ -130,6 +130,7 @@ forgot.
 | `/api/deaths` | Recent deaths (`?limit=`) |
 | `/api/daily` | Player-hours, deaths and landmarks per day (`?days=`) |
 | `/api/world` | How each world is set up: modifiers, preset, game version |
+| `/api/raids` | Raids, newest first, with who was online |
 | `/api/milestones` | Boss kills and firsts, with how each was dated |
 | `/api/weather` | Each world's clock, phase and per-biome weather |
 | `/api/diagnostics` | The diagnostics page, as JSON |
