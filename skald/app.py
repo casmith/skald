@@ -287,6 +287,14 @@ def parse_line(line):
     m = TS_RE.search(line)
     if not m:
         return None
+    # A timestamp in quotes is a line being quoted inside another one. The
+    # hook runner announces its work -- `Running hook "cat >> ..." for "<the
+    # whole game line>"` -- so a full log holds every hooked line twice, and
+    # the second copy differs by a trailing quote, which is just enough to
+    # slip past the primary key. Taken at face value it is a second death,
+    # a second arrival, a second of whatever it was.
+    if m.start() and line[m.start() - 1] == '"':
+        return None
     mo, d, y, hh, mi, ss = map(int, m.groups())
     ts = datetime(y, mo, d, hh, mi, ss, tzinfo=UTC).timestamp()
     body = line[m.start():].strip()
@@ -378,6 +386,19 @@ def parse_any(line):
     return parse_line(unwrap(line))
 
 
+def tidy_echoed_events():
+    """Once: clear out copies stored before echoes were recognised."""
+    conn = db()
+    if store.meta(conn, "dropped_echoes"):
+        return 0
+    gone = store.drop_echoed_events(conn)
+    store.set_meta(conn, "dropped_echoes", str(gone))
+    if gone:
+        print(f"dropped {gone} events that were an echo of another line",
+              flush=True)
+    return gone
+
+
 def catch_up_if_patterns_changed():
     """If Skald has learned a new line since last time, read the logs again.
 
@@ -403,6 +424,9 @@ def ingest_events():
     way. Returns how many lines were new.
     """
     added = 0
+    if tidy_echoed_events():
+        with _CACHE_LOCK:
+            _CACHE["history"] = None
     if catch_up_if_patterns_changed():
         print("skald understands a line it did not before; re-reading the logs",
               flush=True)
