@@ -257,7 +257,10 @@ COLOURS = {
     "Mistlands": (84, 84, 102), "AshLands": (140, 58, 44),
     "DeepNorth": (206, 222, 232),
 }
-MAP_SPAN = 10500.0          # the world's radius, plus the water beyond it
+# Drawn to the same reach as the game's map texture, 2048 pixels of 12
+# metres, so the explored mask lies over the terrain without scaling. The
+# land stops at 10500; the rest is the ocean the poles sit in.
+MAP_SPAN = 2048 * 12 / 2
 
 
 def render(world, size=2048, progress=None):

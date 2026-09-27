@@ -1409,7 +1409,9 @@ def terrain_png(world):
     meta = world_metadata(world)
     if not meta:
         return None
-    path = os.path.join(DATA_DIR, f"terrain-{meta['seed']}-{TERRAIN_SIZE}.png")
+    path = os.path.join(
+        DATA_DIR,
+        f"terrain-{meta['seed']}-{TERRAIN_SIZE}-{int(worldgen.MAP_SPAN)}.png")
     try:
         with open(path, "rb") as f:
             return f.read()
@@ -2493,7 +2495,7 @@ __MAPS__
 </body></html>"""
 
 
-def render_map(names, mapped, requested, shared=None, seeds=None):
+def render_map(names, mapped, requested, shared=None, seeds=None, fog=True):
     """The group's map.
 
     Two sources, and the first is far the better one. A world's own save
@@ -2503,13 +2505,20 @@ def render_map(names, mapped, requested, shared=None, seeds=None):
     """
     shared = shared or {}
     seeds = seeds or {}
-    entries = [{"key": world, "label": world, "n": None,
-                "seen": m["seen"], "edge": m["edge"], "table": True}
-               for world, m in sorted(shared.items())]
+    # Every world we can draw gets a tab, whether or not anyone has shared
+    # a map of it: the terrain alone is worth looking at, and a world
+    # missing from the list reads as broken rather than as unexplored.
+    entries = []
+    for world in sorted(set(shared) | {w for w, m in seeds.items() if m}):
+        m = shared.get(world)
+        entries.append({"key": world, "label": world, "n": None,
+                        "seen": m["seen"] if m else 0,
+                        "edge": m["edge"] if m else TERRAIN_SIZE,
+                        "table": True, "fog": bool(m)})
     entries += [{"key": str(m["world_uid"]),
                  "label": names.get(m["world_uid"], str(m["world_uid"])),
                  "n": m["people"], "seen": None, "edge": m["edge"],
-                 "table": False}
+                 "table": False, "fog": True}
                 for m in sorted(mapped, key=lambda m: -m["newest"])]
     if not entries:
         return MAP_PAGE.replace("__TABS__", "").replace("__BODY__",
@@ -2528,7 +2537,9 @@ def render_map(names, mapped, requested, shared=None, seeds=None):
     if pick["table"]:
         seen, edge = pick["seen"], pick["edge"]
         where = ("from this world&rsquo;s cartography table &mdash; everything "
-                 "anyone has shared to it")
+                 "anyone has shared to it" if pick["fog"] else
+                 "nobody has shared a map of this one yet &mdash; build a "
+                 "cartography table and it appears here")
     else:
         merged = merged_map(int(pick["key"]))
         seen, edge = merged["seen"], merged["edge"]
@@ -2545,19 +2556,27 @@ def render_map(names, mapped, requested, shared=None, seeds=None):
         terrain = (f'<img class="terrain" src="/terrain.png?world={pick["key"]}"'
                    f' alt="" width="{edge}" height="{edge}">')
     over = "&over=1" if terrain else ""
+    # Showing the terrain with the fog off is how you tell a wrong map from
+    # a wrongly-placed one.
+    show_fog = fog and pick.get("fog", True)
+    toggle = (f'<a href="/map?world={pick["key"]}&fog={"0" if fog else "1"}">'
+              f'{"hide" if fog else "show"} fog of war</a>'
+              if pick.get("fog", True) and terrain else "")
     note = (" &middot; terrain drawn from the world seed; the lit part is what "
             "the group has explored" if terrain else "")
     body = (f'<p class="facts"><b>{label}</b> &middot; {share:.2f}% of the map '
             f'seen &middot; {where}{seed_line}</p>'
             '<div class="viewer" id="viewer"><div class="plate" id="plate">'
             + terrain
-            + f'<img class="fog" src="/map.png?world={pick["key"]}{over}"'
+            + (f'<img class="fog" src="/map.png?world={pick["key"]}{over}"'
               f' alt="Explored map of {label}" width="{edge}" height="{edge}">'
-            '</div></div>'
+               if show_fog else "")
+            + '</div></div>'
             '<p class="facts"><button type="button" data-zoom="-1">&minus;</button> '
             '<button type="button" data-zoom="1">+</button> '
             '<button type="button" data-zoom="0">reset</button>'
-            ' &middot; drag to pan, wheel to zoom' + note + '</p>')
+            ' &middot; drag to pan, wheel to zoom'
+            + (" &middot; " + toggle if toggle else "") + note + '</p>')
     return MAP_PAGE.replace("__TABS__", tabs).replace("__BODY__", body)
 
 
@@ -2588,10 +2607,10 @@ MAP_PAGE = """<!doctype html>
  .plate{position:absolute;inset:0;transform-origin:0 0}
  .plate img{position:absolute;inset:0;width:100%;height:100%;
   image-rendering:pixelated;display:block}
- /* Unexplored ground is dimmed rather than hidden, so the world is legible
-    and what the group has actually seen still stands out. */
- .fog{mix-blend-mode:multiply}
- .terrain{opacity:1}
+ /* Unexplored ground is not shown at all -- only where the group has been. */
+ /* The fog is painted, not blended: everywhere unexplored is the panel's
+    own colour, everywhere seen is transparent. */
+ .fog{}
  button{font:inherit;font-size:.82rem;color:var(--gold-dim);background:var(--panel);
   cursor:pointer;border:1px solid var(--line);border-radius:3px;padding:.1rem .6rem}
  button:hover{border-color:var(--bronze);color:var(--gold)}
@@ -2986,10 +3005,13 @@ class Handler(BaseHTTPRequestHandler):
             # Over terrain the fog is a multiply mask, so explored ground has
             # to be white to leave the colour beneath it alone; on its own it
             # is a picture, and parchment on dark reads better.
-            colours = (((18, 14, 10), (255, 255, 255))
-                       if params.get("over", [""])[0] else
-                       ((26, 20, 14), (214, 178, 116)))
-            body = fch.png(merged["bits"], merged["edge"], colours)
+            if params.get("over", [""])[0]:
+                # Over terrain: paint the unexplored world out in the panel's
+                # own colour and let the explored part through.
+                colours, alpha = ((28, 22, 16), (0, 0, 0)), (255, 0)
+            else:
+                colours, alpha = ((26, 20, 14), (214, 178, 116)), None
+            body = fch.png(merged["bits"], merged["edge"], colours, alpha)
             self.send_response(200)
             self.send_header("Content-Type", "image/png")
             self.send_header("Content-Length", str(len(body)))
@@ -3014,7 +3036,8 @@ class Handler(BaseHTTPRequestHandler):
                                               params.get("world", [""])[0],
                                               dict(WORLD_MAPS),
                                               {w: world_metadata(w)
-                                               for w in sorted(SERVERS)}),
+                                               for w in sorted(SERVERS)},
+                                              params.get("fog", ["1"])[0] != "0"),
                               "text/html; charset=utf-8")
 
         now = time.time()

@@ -320,7 +320,7 @@ def merge(packed_a, packed_b):
     return bytes(x | y for x, y in zip(a, b, strict=True))
 
 
-def png(packed, edge, colours=((26, 20, 14), (214, 178, 116))):
+def png(packed, edge, colours=((26, 20, 14), (214, 178, 116)), alpha=None):
     """A 1-bit paletted PNG of an explored bitmap, written by hand.
 
     Paletted at one bit a pixel because that is exactly what the data is:
@@ -343,8 +343,12 @@ def png(packed, edge, colours=((26, 20, 14), (214, 178, 116))):
 
     header = struct.pack(">IIBBBBB", edge, edge, 1, 3, 0, 0, 0)
     palette = b"".join(bytes(c) for c in colours)
+    # `alpha` gives an opacity per palette entry. Laid over terrain, the
+    # explored colour is made fully transparent so the ground shows through
+    # and the rest is painted out -- unexplored means unseen, not dimmed.
+    trns = chunk(b"tRNS", bytes(alpha)) if alpha else b""
     return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header)
-            + chunk(b"PLTE", palette)
+            + chunk(b"PLTE", palette) + trns
             + chunk(b"IDAT", zlib.compress(bytes(rows), 9))
             + chunk(b"IEND", b""))
 
@@ -379,6 +383,13 @@ def world_uid(fwl):
 # zeroes, which deflates to almost nothing, and skipping small files would
 # skip exactly the worlds whose map has only just started.
 WORLD_MAP_MIN = 256
+
+# The map texture is 2048 pixels at 12 metres each, so it reaches 12288
+# metres out -- far enough to hold the Ashlands and the Deep North, which
+# sit beyond the 10500 the land itself stops at. Getting this wrong scales
+# the explored area against the terrain under it.
+MAP_PIXEL_SIZE = 12
+MAP_SPAN = 2048 * MAP_PIXEL_SIZE / 2
 
 
 def world_map(directory, cache=None):
@@ -436,6 +447,11 @@ def _world_map_in(path):
             if edge < WORLD_MAP_MIN or edge > MAX_EDGE:
                 continue
             explored = raw[run.start():run.start() + edge * edge]
+            # Unity textures start at the bottom-left; a PNG starts at the
+            # top-left. Turn it over once, here, so everything downstream
+            # can think in ordinary image coordinates.
+            explored = b"".join(explored[y * edge:(y + 1) * edge]
+                                for y in range(edge - 1, -1, -1))
             packed = pack(explored)
             seen = sum(bin(b).count("1") for b in packed)
             if best is None or seen > best["seen"]:
