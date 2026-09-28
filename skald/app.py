@@ -1369,6 +1369,19 @@ _CARTO_FILES = {}
 
 
 TERRAIN_SIZE = 2048          # the resolution Valheim's own map uses
+# Drawing a world takes minutes and is pure CPU. The server is threaded, so
+# without this every request that arrives during a drawing starts another
+# one of its own -- and they then compete for the same core and all of them
+# take longer. One drawing per seed; everyone else waits for it and reads
+# the file it leaves.
+_TERRAIN_LOCKS = {}
+_TERRAIN_LOCKS_GUARD = threading.Lock()
+
+
+def _terrain_lock(key):
+    with _TERRAIN_LOCKS_GUARD:
+        return _TERRAIN_LOCKS.setdefault(key, threading.Lock())
+
 WORLD_SEEDS = {}             # world -> {"seed", "seed_name", "uid"}
 
 
@@ -1419,17 +1432,27 @@ def terrain_png(world):
             return f.read()
     except OSError:
         pass
-    print(f"drawing {world} from seed {meta['seed']}; this happens once",
-          flush=True)
-    started = time.time()
-    body = worldgen.render(worldgen.World(meta["seed"]), TERRAIN_SIZE)
-    try:
-        with open(path, "wb") as f:
-            f.write(body)
-    except OSError as e:
-        print(f"could not keep the terrain for {world}: {e}", flush=True)
-    print(f"drew {world} in {time.time() - started:.0f}s", flush=True)
-    return body
+    with _terrain_lock(path):
+        # Someone may have drawn it while we waited for the lock.
+        try:
+            with open(path, "rb") as f:
+                return f.read()
+        except OSError:
+            pass
+        print(f"drawing {world} from seed {meta['seed']}; this happens once",
+              flush=True)
+        started = time.time()
+        body = worldgen.render(worldgen.World(meta["seed"]), TERRAIN_SIZE)
+        try:
+            # Through a temporary name: a half-written file is still a file,
+            # and the next reader would serve it as the finished picture.
+            with open(path + ".part", "wb") as f:
+                f.write(body)
+            os.replace(path + ".part", path)
+        except OSError as e:
+            print(f"could not keep the terrain for {world}: {e}", flush=True)
+        print(f"drew {world} in {time.time() - started:.0f}s", flush=True)
+        return body
 
 
 def refresh_world_maps():
