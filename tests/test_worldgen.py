@@ -99,3 +99,64 @@ def test_rendering_gives_a_png_of_the_right_size():
 def test_every_biome_has_a_colour():
     for biome in w.BIOMES:
         assert biome in w.COLOURS
+
+
+# --- the ground, as opposed to the biome ------------------------------------
+#
+# The base height decides which biome stands somewhere; it is not how high
+# the ground is. Confusing the two drew three quarters of the world as land.
+
+
+def test_sample_agrees_with_biome():
+    world = w.World.from_name("B5yNkBmZd5")
+    for x, y in ((0.0, 0.0), (1500.0, -2300.0), (-6000.0, 800.0), (0.0, 9800.0)):
+        assert world.sample(x, y)[0] == world.biome(x, y)
+
+
+def test_the_deep_north_still_answers_with_a_pair():
+    """The one branch that returns a conditional, and so the one a careless
+    edit turns into a bare string."""
+    world = w.World.from_name("B5yNkBmZd5")
+    biome, base = world.sample(0.0, -11000.0)
+    assert biome in ("Mountain", "DeepNorth", "AshLands", "Ocean")
+    assert isinstance(base, float)
+
+
+def test_marsh_ignores_the_base_height_and_sits_below_the_sea():
+    """Swamp generates at 0.137 -- 27.4 metres -- whatever the land under it
+    was going to do. It is bog: under the water line by construction, and so
+    the one biome that must not be painted as sea."""
+    world = w.World.from_name("B5yNkBmZd5")
+    h = world.height(0.0, 0.0, "Swamp", 0.9)
+    assert 24.0 < h < 30.0, h
+    assert world.height(0.0, 0.0, "Swamp", 0.01) == pytest.approx(h)
+
+
+def test_the_polar_gap_drowns_the_border_and_nothing_else():
+    """Zero exactly on the line, back to one within 400 metres either side.
+    It is what makes Ashlands an island instead of a continuation."""
+    world = w.World.from_name("B5yNkBmZd5")
+    assert world._gap(0.0, 0.0, w.ASHLANDS_Y_OFFSET) == 1.0
+    on_the_line = world._gap(0.0, 4000.0 + 12000.0, w.ASHLANDS_Y_OFFSET)
+    assert on_the_line < 0.05, on_the_line
+
+
+def test_most_of_the_world_is_under_water():
+    """The check that caught the bug. Valheim is an archipelago: about three
+    quarters of it is not Ocean *biome*, but only about two fifths of it is
+    dry. Painting by biome alone gave 70% land and a continent.
+    """
+    world = w.World.from_name("B5yNkBmZd5")
+    dry = wet = 0
+    for j in range(-20, 21):
+        for i in range(-20, 21):
+            x, y = i * 400.0, j * 400.0
+            if x * x + y * y > 8000.0 ** 2:
+                continue
+            biome, base = world.sample(x, y)
+            if biome == "Swamp" or world.height(x, y, biome, base) >= w.SEA_LEVEL:
+                dry += 1
+            else:
+                wet += 1
+    share = dry / (dry + wet)
+    assert 0.30 < share < 0.50, f"dry land {share:.0%}, expected about two fifths"

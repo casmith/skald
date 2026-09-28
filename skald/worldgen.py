@@ -218,33 +218,125 @@ class World:
 
     def biome(self, wx, wy):
         """Which biome stands at this point. A chain of thresholds, in order."""
+        return self.sample(wx, wy)[0]
+
+    def sample(self, wx, wy):
+        """The biome here, and the base height the chain decided it from.
+
+        Worth having as one call: the height layer below needs both, and the
+        base height is a dozen noise samples.
+        """
         dist = math.hypot(wx, wy)
         base = self.base_height(wx, wy)
         a = self.world_angle(wx, wy) * 100.0
 
         if math.hypot(wx, wy + ASHLANDS_Y_OFFSET) > POLAR_MIN_DISTANCE + a:
-            return "AshLands"
+            return "AshLands", base
         if base <= 0.02:
-            return "Ocean"
+            return "Ocean", base
         if math.hypot(wx, wy + DEEP_NORTH_Y_OFFSET) > POLAR_MIN_DISTANCE + a:
-            return "Mountain" if base > 0.4 else "DeepNorth"
+            return ("Mountain" if base > 0.4 else "DeepNorth"), base
         if base > 0.4:
-            return "Mountain"
+            return "Mountain", base
         if (perlin((self.offset0 + wx) * 0.001, (self.offset0 + wy) * 0.001) > 0.6
                 and 2000.0 < dist < self.max_marsh_distance and 0.05 < base < 0.25):
-            return "Swamp"
+            return "Swamp", base
         if (perlin((self.offset4 + wx) * 0.001, (self.offset4 + wy) * 0.001)
                 > self.min_darkland_noise and 6000.0 + a < dist < 10000.0):
-            return "Mistlands"
+            return "Mistlands", base
         if (perlin((self.offset1 + wx) * 0.001, (self.offset1 + wy) * 0.001) > 0.4
                 and 3000.0 + a < dist < 8000.0):
-            return "Plains"
+            return "Plains", base
         if (perlin((self.offset2 + wx) * 0.001, (self.offset2 + wy) * 0.001) > 0.4
                 and 600.0 + a < dist < 6000.0):
-            return "BlackForest"
+            return "BlackForest", base
         if dist > 5000.0 + a:
-            return "BlackForest"
-        return "Meadows"
+            return "BlackForest", base
+        return "Meadows", base
+
+
+    # ---- how high the ground actually is -------------------------------
+    #
+    # The base height above decides the *biome*; it is not the ground. Each
+    # biome then shapes its own terrain, and the game's map colours water by
+    # comparing that result against sea level -- not by asking whether the
+    # biome is Ocean. The two are very different questions: about three
+    # quarters of the world is not Ocean, and only about two fifths of it is
+    # dry. Colour by biome alone and every drowned shelf paints green, which
+    # turns an archipelago into a continent.
+
+    def _detail(self, x, y):
+        n = perlin(x * 0.01, y * 0.01) * perlin(x * 0.02, y * 0.02)
+        return n + perlin(x * 0.05, y * 0.05) * perlin(x * 0.1, y * 0.1) * n * 0.5
+
+    @staticmethod
+    def _rough(x, y, h):
+        return h + perlin(x * 0.1, y * 0.1) * 0.01 + perlin(x * 0.4, y * 0.4) * 0.003
+
+    def _gap(self, wx, wy, y_offset):
+        """Zero on a polar border, back to one over 400 metres either side.
+
+        This scales the height *multiplier*, so it drowns the ground on both
+        sides of the line. It is what makes Ashlands and the Deep North
+        islands rather than a continuation of the map.
+        """
+        r = math.hypot(wx, wy + y_offset)
+        if r < 11400.0 or r > 12600.0:
+            return 1.0
+        a = self.world_angle(wx, wy) * 100.0
+        t = _clamp01(abs(r - (POLAR_MIN_DISTANCE + a)) / 400.0)
+        t = -2.0 * t * t * t + 3.0 * t * t
+        return t
+
+    def height(self, wx, wy, biome=None, base=None):
+        """The ground here, in metres. Sea level is 30."""
+        if biome is None:
+            biome, base = self.sample(wx, wy)
+        x = wx + 100000.0 + self.offset3
+        y = wy + 100000.0 + self.offset3
+
+        if biome in ("Meadows", "Plains"):
+            h = base + self._detail(x, y) * 0.1
+            over = h - 0.15
+            if over > 0.0:                 # flatten what rises above the shore
+                h -= over * (1.0 - _clamp01(base / 0.4)) * 0.75
+            h = self._rough(x, y, h)
+        elif biome == "BlackForest":
+            h = self._rough(x, y, base + self._detail(x, y) * 0.1)
+        elif biome == "Swamp":
+            # Marsh ignores the base height entirely and sits at 0.137 --
+            # 27.4 metres, just under the sea. It is bog, not ocean.
+            mx, my = wx + 100000.0, wy + 100000.0
+            h = self._rough(mx, my, 0.137 + perlin(mx * 0.04, my * 0.04)
+                            * perlin(mx * 0.08, my * 0.08) * 0.03)
+        elif biome == "Mountain":
+            tilt = (abs(self.base_height(wx + 1.0, wy) - self.base_height(wx - 1.0, wy))
+                    + abs(self.base_height(wx, wy - 1.0) - self.base_height(wx, wy + 1.0)))
+            h = self._rough(x, y, base + (base - 0.4) + self._detail(x, y) * 0.2)
+            h += perlin(x * 0.2, y * 0.2) * 2.0 * tilt
+        elif biome == "DeepNorth":
+            h = (base + max(0.0, base - 0.4) + self._detail(x, y) * 0.2) * 1.2
+            h += perlin(x * 0.1, y * 0.1) * 0.01 + perlin(x * 0.4, y * 0.4) * 0.003
+        elif biome == "Mistlands":
+            n = perlin(x * 0.014, y * 0.014) * perlin(x * 0.028, y * 0.028)
+            n += perlin(x * 0.021, y * 0.021) * perlin(x * 0.035, y * 0.035) * n * 0.5
+            if n > 0.0:
+                n = n ** 1.5
+            h = base + n * 0.4
+            t = _clamp01(n * 7.0)
+            h += perlin(x * 0.1, y * 0.1) * 0.03 * t
+            h += perlin(x * 0.4, y * 0.4) * 0.01 * t
+            h = _lerp(t, h + perlin(x * 0.4, y * 0.4) * 0.002,
+                      math.ceil(h * 400.0) / 400.0)
+        elif biome == "Ocean":
+            h = base
+        else:                              # AshLands, to its pregenerate shape
+            h = self._rough(x, y, base + self._detail(x, y) * 0.1 + 0.1)
+
+        mult = (HEIGHT_MULTIPLIER
+                * self._gap(wx, wy, ASHLANDS_Y_OFFSET)
+                * self._gap(wx, wy, DEEP_NORTH_Y_OFFSET))
+        return h * mult
 
 
 # What each biome looks like. Chosen to read at a glance rather than to
@@ -261,6 +353,41 @@ COLOURS = {
 # metres, so the explored mask lies over the terrain without scaling. The
 # land stops at 10500; the rest is the ocean the poles sit in.
 MAP_SPAN = 2048 * 12 / 2
+
+# Base heights are fractions; the ground is 200 times one. Sea level is 30
+# metres, which is why 0.15 keeps turning up as "the shore".
+HEIGHT_MULTIPLIER = 200.0
+SEA_LEVEL = 30.0
+
+# The sea, by depth. The biome supplies the hue of dry land; below the
+# shoreline the map fades through these instead, which is what makes a
+# coastline read as a coastline.
+SHORE = (60, 102, 125)
+SHALLOW = (48, 86, 116)
+DEEP = (34, 60, 94)
+
+
+def _mix(a, b, t):
+    """`a` at t=0, `b` at t=1."""
+    t = _clamp01(t)
+    return tuple(int(round(c + (d - c) * t)) for c, d in zip(a, b, strict=True))
+
+
+def _paint(world, wx, wy, biome, base):
+    """What colour this point is: its biome, then however deep the sea is.
+
+    Swamp is the exception the game makes too. Marsh generates at 27 metres,
+    below the sea by construction, and drawing it blue would put a third of
+    the map's bogs underwater.
+    """
+    if biome == "Swamp":
+        return COLOURS["Swamp"]
+    h = world.height(wx, wy, biome, base)
+    if h >= SEA_LEVEL:
+        return COLOURS[biome]
+    colour = _mix(SHORE, COLOURS[biome], _clamp01(h - SEA_LEVEL + 1.0))
+    colour = _mix(SHALLOW, colour, _clamp01((h - SEA_LEVEL + 2.5) * 0.5))
+    return _mix(DEEP, colour, _clamp01((h - SEA_LEVEL + 12.5) * 0.1))
 
 
 def render(world, size=2048, progress=None):
@@ -281,7 +408,8 @@ def render(world, size=2048, progress=None):
         rows.append(0)                     # PNG filter: none
         for i in range(size):
             wx = -MAP_SPAN + (i + 0.5) * step
-            rows += bytes(COLOURS[world.biome(wx, wy)])
+            biome, base = world.sample(wx, wy)
+            rows += bytes(_paint(world, wx, wy, biome, base))
         if progress and j % 64 == 0:
             progress(j, size)
 
