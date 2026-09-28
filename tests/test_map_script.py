@@ -24,13 +24,35 @@ def _script():
 
 def test_no_string_literal_runs_off_the_end_of_its_line():
     """The cheap version of a parser, and the one that catches the mistake
-    that prompted this: a quote opened and never closed on the same line."""
+    that prompted this: a quote opened and never closed on the same line.
+
+    Scanned rather than pattern-matched, because a backslash only escapes
+    the character after it -- so the quote ending `'\\n'` is a real quote,
+    and a rule that looks only at the previous character calls it escaped
+    and then reports every such line as broken.
+
+    It does not understand regular expression literals, where a quote is
+    just a character. The script avoids them; `node --check` below is the
+    parser that actually knows the language.
+    """
     for n, line in enumerate(_script().splitlines(), start=1):
-        code = re.sub(r"//.*$", "", line)
-        for quote in ("'", '"'):
-            unescaped = len(re.findall(r"(?<!\\)" + quote, code))
-            assert unescaped % 2 == 0, (
-                f"line {n} leaves a {quote} open: {line.strip()!r}")
+        quote, escaped, comment = None, False, False
+        for i, ch in enumerate(line):
+            if escaped:
+                escaped = False
+                continue
+            if ch == "\\" and quote:
+                escaped = True
+            elif quote:
+                if ch == quote:
+                    quote = None
+            elif ch in "'\"":
+                quote = ch
+            elif ch == "/" and line[i + 1:i + 2] == "/":
+                comment = True
+                break
+        assert quote is None or comment, (
+            f"line {n} leaves a {quote} open: {line.strip()!r}")
 
 
 def test_braces_and_brackets_balance():

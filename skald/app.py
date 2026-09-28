@@ -47,7 +47,6 @@ import gzip
 import hashlib
 import html
 import json
-import math
 import os
 import re
 import struct
@@ -2624,36 +2623,6 @@ __MAPS__
 </body></html>"""
 
 
-# How close two portals have to be to be drawn as one. At the map's own
-# scale a marker covers a few hundred metres of ground, so a hub of six
-# within twenty metres is a single illegible blob -- which is what this is
-# for. Zoomed in they separate again and this stops applying.
-PORTAL_CLUSTER = 400.0
-
-
-def cluster_portals(portals, radius=PORTAL_CLUSTER):
-    """Group portals that would be drawn on top of each other.
-
-    Each goes to the nearest group whose middle is within `radius`, or
-    starts one of its own. Nearest rather than first, so a run of portals
-    does not chain into one long group by way of its neighbours.
-    """
-    groups = []
-    for hole in portals:
-        best, best_d = None, None
-        for group in groups:
-            mx = sum(g["x"] for g in group) / len(group)
-            mz = sum(g["z"] for g in group) / len(group)
-            d = math.hypot(hole["x"] - mx, hole["z"] - mz)
-            if d <= radius and (best_d is None or d < best_d):
-                best, best_d = group, d
-        if best is None:
-            groups.append([hole])
-        else:
-            best.append(hole)
-    return groups
-
-
 def render_map(names, mapped, requested, shared=None, seeds=None, fog=True,
                pins=True, portals=True, built=True):
     """The group's map.
@@ -2760,52 +2729,26 @@ def render_map(names, mapped, requested, shared=None, seeds=None, fog=True,
     if portals and world_portals:
         span = fch.MAP_SPAN
         ends = collections.Counter(p["name"] for p in world_portals if p["name"])
-        def place(x, z):
-            return ((x + span) / (2 * span) * 100,
-                    (span - z) / (2 * span) * 100)
-
-        out = []
-        # Zoomed out: one marker for each huddle, saying how many and, on
-        # hover, which. Zoomed in: every portal on its own. Both are drawn
-        # and the stylesheet picks, so there is no clustering to get wrong
-        # while somebody is dragging the map about.
-        for group in cluster_portals(world_portals):
-            mx = sum(g["x"] for g in group) / len(group)
-            mz = sum(g["z"] for g in group) / len(group)
-            left, top = place(mx, mz)
-            if not 0 <= left <= 100 or not 0 <= top <= 100:
-                continue
-            named = [pin_label(g["name"]) for g in group if g["name"]]
-            unnamed = len(group) - len(named)
-            if unnamed:
-                named.append(f'{unnamed} unnamed')
-            # Carried as data, not as `title`: the viewer captures the
-            # pointer while the map is being moved so the marker never sees
-            # the event, and a phone has no hover to show a title with at
-            # all. The script reads this and draws its own.
-            listing = html.escape("\n".join(named))
-            count = (f'<em>{len(group)}</em>' if len(group) > 1 else "")
-            label = (f'<i>{html.escape(named[0])}</i>'
-                     if len(group) == 1 and named else "")
-            out.append(
-                f'<b class="pin portal group" data-names="{listing}"'
-                f' style="left:{left:.4f}%;top:{top:.4f}%"'
-                f'>\u25c8{count}{label}</b>')
-
+        # Handed over as data rather than as markers, because where one
+        # marker stops and the next begins depends on how far in you are.
+        # Two portals twenty metres apart are four screen pixels apart at
+        # 2.5x and a comfortable gap at 16x, so the grouping is the page's
+        # to work out and rework every time the zoom changes.
+        holes = []
         for hole in world_portals:
-            left, top = place(hole["x"], hole["z"])
+            left = (hole["x"] + span) / (2 * span) * 100
+            top = (span - hole["z"]) / (2 * span) * 100
             if not 0 <= left <= 100 or not 0 <= top <= 100:
                 continue
             name = hole["name"]
-            lone = " lone" if name and ends[name] == 1 else ""
-            shown = pin_label(name) if name else ""
-            label_html = f'<i>{html.escape(shown)}</i>' if shown else ""
-            out.append(
-                f'<b class="pin portal one{lone}"'
-                f' style="left:{left:.4f}%;top:{top:.4f}%"'
-                + (f' data-names="{html.escape(shown)}"' if shown else "")
-                + f'>\u25c8{label_html}</b>')
-        marks += '<div class="pins">' + "".join(out) + "</div>"
+            holes.append({
+                "x": round(left, 4), "y": round(top, 4),
+                "n": pin_label(name) if name else "",
+                "lone": bool(name) and ends[name] == 1,
+            })
+        marks += ('<div class="pins portals" id="portals" data-portals="'
+                  + html.escape(json.dumps(holes, separators=(",", ":")))
+                  + '"></div>')
     over = "&over=1" if terrain else ""
     # Showing the terrain with the fog off is how you tell a wrong map from
     # a wrongly-placed one.
@@ -2915,9 +2858,8 @@ MAP_PAGE = """<!doctype html>
  /* Zoomed out, the huddles; zoomed in, the portals themselves. Both are
     in the page and this chooses, so nothing is being clustered while the
     map is moving. */
- .plate:not([data-close]) .pin.portal.one{display:none}
- .plate[data-close] .pin.portal.group{display:none}
- .plate:not([data-close]) .pin.portal i{display:none}
+ /* A name is only drawn when its marker stands alone; a huddle
+    shows its count and names them when tapped. */
  /* How many are in the huddle. Hovering it names them. */
  .pin.portal em{font-style:normal;font-size:9px;font-weight:700;
    vertical-align:super;margin-left:1px;color:#f0e4ff}
@@ -2962,6 +2904,31 @@ __BODY__
  // Pan and zoom, in the least code that behaves properly: one transform on
  // the plate, and the wheel zooms about the pointer rather than the corner,
  // which is the difference between a map you can read and one you fight.
+ // Which markers stand together at this zoom. Pure: no document, no
+ // state, so it can be lifted out of the page and tested on its own.
+ // Each pin joins the NEAREST group within reach, not the first one it
+ // touches -- by first match a row of pins each within reach of the last
+ // chains into one group spanning the map.
+ function groupPins(items, reach) {
+   var groups = [];
+   items.forEach(function (h) {
+     var best = null, bestD = null;
+     for (var i = 0; i < groups.length; i++) {
+       var g = groups[i];
+       var d = Math.hypot(h.x - g.x, h.y - g.y);
+       if (d <= reach && (bestD === null || d < bestD)) { best = g; bestD = d; }
+     }
+     if (!best) {
+       groups.push({x: h.x, y: h.y, all: [h]});
+     } else {
+       best.all.push(h);
+       var n = best.all.length;
+       best.x = best.all.reduce(function (t, p) { return t + p.x; }, 0) / n;
+       best.y = best.all.reduce(function (t, p) { return t + p.y; }, 0) / n;
+     }
+   });
+   return groups;
+ }
  (function () {
    var viewer = document.getElementById('viewer');
    var plate = document.getElementById('plate');
@@ -2977,7 +2944,47 @@ __BODY__
      plate.style.setProperty('--unzoom', 1 / z);
      // A hub can hold six portals within a few metres, so their names
      // only appear once you are close enough for them not to pile up.
-     plate.toggleAttribute('data-close', z >= 2.5);
+     drawPortals();
+   }
+   // Portals, grouped by how far apart they look rather than how far
+   // apart they are. A hub can hold a dozen within twenty metres; at 2.5x
+   // that is four screen pixels and they are one blob, and at 16x they are
+   // a comfortable gap. So the grouping is worked out again on every zoom,
+   // and a marker says how many are under it.
+   var portalBox = document.getElementById('portals');
+   var portalData = [];
+   if (portalBox) {
+     try { portalData = JSON.parse(portalBox.dataset.portals); } catch (e) {}
+   }
+   var GAP = 22;                 // screen pixels; under this they are one
+   var lastKey = '';
+   function drawPortals() {
+     if (!portalBox || !portalData.length) return;
+     var plateSize = viewer.clientWidth * z;
+     var reach = GAP / plateSize * 100;
+     var key = reach.toFixed(4);
+     if (key === lastKey) return;   // same zoom, same grouping
+     lastKey = key;
+     var groups = groupPins(portalData, reach);
+     var html = '';
+     groups.forEach(function (g) {
+       var named = g.all.filter(function (p) { return p.n; });
+       var unnamed = g.all.length - named.length;
+       var names = named.map(function (p) { return p.n; });
+       if (unnamed) names.push(unnamed + ' unnamed');
+       var lone = (g.all.length === 1 && g.all[0].lone) ? ' lone' : '';
+       var count = g.all.length > 1 ? '<em>' + g.all.length + '</em>' : '';
+       var label = (g.all.length === 1 && named.length)
+         ? '<i>' + esc(named[0]) + '</i>' : '';
+       html += '<b class="pin portal' + lone + '" data-names="'
+         + esc(names.join('\\n')) + '" style="left:' + g.x.toFixed(4)
+         + '%;top:' + g.y.toFixed(4) + '%">◈' + count + label + '</b>';
+     });
+     portalBox.innerHTML = html;
+   }
+   function esc(t) {
+     return t.split('&').join('&amp;').split('<').join('&lt;')
+             .split('>').join('&gt;').split('"').join('&quot;');
    }
    function zoomAbout(factor, cx, cy) {
      var next = Math.min(16, Math.max(1, z * factor));
