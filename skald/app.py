@@ -1404,14 +1404,16 @@ def terrain_png(world):
     why a ten-kilometre world fits in a few megabytes -- so this is the only
     way to draw one, and it takes about a minute. The result cannot change
     for a given seed, so it is written next to the database and read from
-    there ever after.
+    there ever after -- until the way we draw it changes, which is what
+    worldgen.MODEL in the name is for.
     """
     meta = world_metadata(world)
     if not meta:
         return None
     path = os.path.join(
         DATA_DIR,
-        f"terrain-{meta['seed']}-{TERRAIN_SIZE}-{int(worldgen.MAP_SPAN)}.png")
+        f"terrain-{meta['seed']}-{TERRAIN_SIZE}-{int(worldgen.MAP_SPAN)}"
+        f"-v{worldgen.MODEL}.png")
     try:
         with open(path, "rb") as f:
             return f.read()

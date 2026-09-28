@@ -356,6 +356,11 @@ MAP_SPAN = 2048 * 12 / 2
 
 # Base heights are fractions; the ground is 200 times one. Sea level is 30
 # metres, which is why 0.15 keeps turning up as "the shore".
+# Bumped whenever the drawing changes. A seed's terrain cannot change, but
+# our rendering of it can, and the cache is keyed on the seed -- so without
+# this a fix reaches nobody who already has the old picture on disk.
+MODEL = 2
+
 HEIGHT_MULTIPLIER = 200.0
 SEA_LEVEL = 30.0
 
