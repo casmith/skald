@@ -1,5 +1,43 @@
 # Changelog
 
+## 0.8.0
+
+- **Real terrain, generated from the world seed.** Valheim stores no
+  terrain — it regenerates it from one integer, which is why a
+  ten-kilometre world fits in a few megabytes — so the only way to draw a
+  map is to do the same arithmetic. Skald now does, with the explored mask
+  laid over it.
+- The map is no longer a silhouette. Explored ground shows in its own
+  colours, with the rest of the world faint behind it, so a coastline is a
+  coastline and a swamp is a swamp.
+- **Zoom and pan**, wheel or buttons, zooming about the pointer rather than
+  the corner.
+- **The ground is drawn, not the biome.** These are different questions and
+  the difference is most of the map. A base height decides which biome
+  stands somewhere; each biome then shapes its own terrain, and the game
+  colours water by comparing *that* against sea level. About three quarters
+  of the world is not Ocean biome and only about two fifths of it is dry —
+  so colouring by biome alone turns an archipelago into a continent. Marsh
+  is the exception the game makes too: it generates at 27 metres, under the
+  water line by construction, and is drawn as the bog it is.
+- Three things had to be exactly right and are checked as such: Unity's
+  Perlin noise (Ken Perlin's 2002 noise with `abs()` inputs and a
+  `(raw + 0.69) / 1.483` rescale), Unity's random number generator, and the
+  order the world's offsets are drawn in — offsets 0..3, two seeds, then
+  offset 4 **last**. Any other order gives a different world that looks
+  perfectly reasonable.
+- Checked against the servers rather than against itself: of 2,221 landmarks
+  the games actually placed, 97.1% stand on dry land, the rest being coastal
+  — a landmark is recorded only by its 64-metre zone. Land area comes to
+  41–42% across the three worlds against a published 38–41%. And against a
+  real in-game map, 93.1% of the pixels a player has explored and sees as
+  land are land, holding at 93.0% on pixels not used to line the two up.
+  The seed hash was separately confirmed against three real world files.
+- Drawn once per seed, about a minute, then kept on disk beside the
+  database. The name records how it was drawn, so improving the drawing
+  replaces what is kept instead of being invisible.
+- Reads the newer `.fwl2` world metadata as well as `.fwl`.
+
 ## 0.7.1
 
 - **A line is no longer counted twice because something quoted it.** The log
