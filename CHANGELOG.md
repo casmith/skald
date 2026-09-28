@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.15.0
+
+- **Tap a portal and see where it goes.** A line is drawn to the other end,
+  and tapping a huddle draws one for every tag under it — so a hub shows
+  everywhere it reaches at once.
+- The pairing is the tag, because that is all there is. A portal's record in
+  the save holds a tag, who built it and sometimes its health, and **no
+  reference to the other end at all** — the game pairs them by tag when it
+  loads. On these worlds no tag is used more than twice, so the lines are
+  exact rather than a guess.
+- A portal whose partner is gone draws nothing, which is most of Warheimer:
+  21 of its 34 tags are used once.
+- Lines are drawn on the map itself, so they pan and zoom with it, and they
+  clear when the markers regroup — a line between markers that have moved
+  would point at nothing.
+
 ## 0.14.1
 
 - **Dragging the map no longer selects half of it.** A pan swept a blue
