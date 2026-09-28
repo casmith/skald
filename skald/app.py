@@ -41,6 +41,7 @@ session is still open, appends a close marker of its own to
 Python stdlib only.
 """
 import collections
+import contextlib
 import glob
 import gzip
 import hashlib
@@ -1379,6 +1380,8 @@ TERRAIN_SIZE = 2048          # the resolution Valheim's own map uses
 # take longer. One drawing per seed; everyone else waits for it and reads
 # the file it leaves.
 _TERRAIN_LOCKS = {}
+# world -> how far its drawing has got, while one is running
+TERRAIN_PROGRESS = {}
 _TERRAIN_LOCKS_GUARD = threading.Lock()
 
 
@@ -1414,49 +1417,86 @@ def world_metadata(world):
     return None
 
 
-def terrain_png(world):
-    """The world's terrain, drawn from its seed. Generated once, then kept.
-
-    Valheim stores no terrain -- it regenerates it from the seed, which is
-    why a ten-kilometre world fits in a few megabytes -- so this is the only
-    way to draw one, and it takes about a minute. The result cannot change
-    for a given seed, so it is written next to the database and read from
-    there ever after -- until the way we draw it changes, which is what
-    worldgen.MODEL in the name is for.
-    """
+def terrain_path(world):
+    """Where this world's drawing is kept, or None if we cannot say."""
     meta = world_metadata(world)
     if not meta:
         return None
-    path = os.path.join(
+    return os.path.join(
         DATA_DIR,
         f"terrain-{meta['seed']}-{TERRAIN_SIZE}-{int(worldgen.MAP_SPAN)}"
         f"-v{worldgen.MODEL}.png")
+
+
+def terrain_png(world):
+    """The world's drawing, if it has already been made.
+
+    Never draws. Drawing takes minutes of one core, and a request is the
+    wrong place to spend them: the page that waits shows nothing, and the
+    person watching it cannot tell a slow map from a broken one. The worker
+    below does the drawing; this only serves what it has finished.
+    """
+    path = terrain_path(world)
+    if not path:
+        return None
     try:
         with open(path, "rb") as f:
             return f.read()
     except OSError:
-        pass
+        return None
+
+
+def draw_terrain(world):
+    """Draw one world and keep it. Returns True if it is there afterwards."""
+    path = terrain_path(world)
+    if not path:
+        return False
     with _terrain_lock(path):
-        # Someone may have drawn it while we waited for the lock.
-        try:
-            with open(path, "rb") as f:
-                return f.read()
-        except OSError:
-            pass
-        print(f"drawing {world} from seed {meta['seed']}; this happens once",
+        if os.path.exists(path):
+            return True
+        meta = world_metadata(world)
+        seed = meta["seed"]
+        print(f"drawing {world} from seed {seed}; this happens once",
               flush=True)
         started = time.time()
-        body = worldgen.render(worldgen.World(meta["seed"]), TERRAIN_SIZE)
+
+        def progress(done, total):
+            TERRAIN_PROGRESS[world] = done / total
+
+        TERRAIN_PROGRESS[world] = 0.0
         try:
+            body = worldgen.render(worldgen.World(seed), TERRAIN_SIZE,
+                                   progress=progress)
             # Through a temporary name: a half-written file is still a file,
             # and the next reader would serve it as the finished picture.
             with open(path + ".part", "wb") as f:
                 f.write(body)
             os.replace(path + ".part", path)
-        except OSError as e:
-            print(f"could not keep the terrain for {world}: {e}", flush=True)
+        except Exception as e:
+            print(f"could not draw {world}: {e}", flush=True)
+            # The rename is what publishes the picture, so a failure before
+            # it leaves a part file nothing will ever finish or replace.
+            with contextlib.suppress(OSError):
+                os.unlink(path + ".part")
+            return False
+        finally:
+            TERRAIN_PROGRESS.pop(world, None)
         print(f"drew {world} in {time.time() - started:.0f}s", flush=True)
-        return body
+        return True
+
+
+def terrain_worker():
+    """Draw whatever is missing, one world at a time.
+
+    One at a time on purpose. These are threads of one process, so the GIL
+    gives them a single core between them however many the machine has --
+    drawing three worlds at once does not finish any of them sooner, and
+    means none of them is ready until nearly all are. Sequential, the first
+    world is usable while the rest are still coming.
+    """
+    for world in sorted(SERVERS):
+        if terrain_png(world) is None:
+            draw_terrain(world)
 
 
 # What the game's pin types mean. Only the ones these worlds actually use
@@ -2615,8 +2655,23 @@ def render_map(names, mapped, requested, shared=None, seeds=None, fog=True,
     if meta:
         seed_line = (f' &middot; seed <b>{html.escape(meta["seed_name"])}</b>'
                      if meta["seed_name"] else f' &middot; seed <b>{meta["seed"]}</b>')
-        terrain = (f'<img class="terrain" src="/terrain.png?world={pick["key"]}"'
-                   f' alt="" width="{edge}" height="{edge}">')
+        if terrain_png(pick["label"]) is not None:
+            terrain = (f'<img class="terrain" src="/terrain.png?world={pick["key"]}"'
+                       f' alt="" width="{edge}" height="{edge}">')
+        else:
+            # Not drawn yet. Say so, rather than embedding an image that is
+            # not coming: a blank square for six minutes reads as broken.
+            drawing = TERRAIN_PROGRESS.get(pick["label"])
+            waiting = ("" if drawing is not None else
+                       " It is waiting for the other worlds to be drawn first.")
+            how_far = (f" {drawing * 100:.0f}% of the way through."
+                       if drawing else "")
+            terrain = (
+                '<div class="drawing"><b>Drawing this world from its seed.</b>'
+                f'<span>Valheim keeps no map &mdash; it rebuilds the world '
+                f'from one number &mdash; so this has to be worked out once, '
+                f'and takes a few minutes.{how_far}{waiting}</span>'
+                '<span class="soon">This page reloads itself.</span></div>')
     # The table's pins, laid over the same square the images fill. Placed as
     # a percentage of the plate rather than in pixels, so they follow the
     # zoom without any arithmetic of their own.
@@ -2701,7 +2756,11 @@ def render_map(names, mapped, requested, shared=None, seeds=None, fog=True,
             '<button type="button" data-zoom="0">reset</button>'
             ' &middot; drag to pan, wheel to zoom'
             + (" &middot; " + toggle if toggle else "") + note + '</p>')
-    return MAP_PAGE.replace("__TABS__", tabs).replace("__BODY__", body)
+    page = MAP_PAGE.replace("__TABS__", tabs).replace("__BODY__", body)
+    if meta and terrain_png(pick["label"]) is None:
+        page = page.replace("<head>",
+                            '<head>\n<meta http-equiv="refresh" content="20">')
+    return page
 
 
 MAP_PAGE = """<!doctype html>
@@ -2729,6 +2788,14 @@ MAP_PAGE = """<!doctype html>
   border-radius:3px;background:var(--panel);aspect-ratio:1;cursor:grab;touch-action:none}
  .viewer:active{cursor:grabbing}
  .plate{position:absolute;inset:0;transform-origin:0 0}
+ /* Shown in place of the terrain while it is being worked out. It sits
+    where the picture will be, so the page does not jump when it arrives. */
+ .drawing{position:absolute;inset:0;display:flex;flex-direction:column;
+   align-items:center;justify-content:center;gap:.6em;padding:2em;
+   text-align:center;color:#d8cba8;background:#241f1a}
+ .drawing b{font-size:1.1em;color:#f3e6c8}
+ .drawing span{max-width:34em;font-size:.9em;line-height:1.5;opacity:.85}
+ .drawing .soon{font-size:.8em;opacity:.55}
  .pins{position:absolute;inset:0}
  /* Each pin sits at its own place on the plate, so the zoom carries it.
     The glyph is pulled back to its own centre and kept at one size however
@@ -3319,6 +3386,7 @@ def main():
             f"  chown -R {os.getuid()}:{os.getgid()} <the directory or volume>\n"
             "See the README's Permissions section.")
     threading.Thread(target=poller, daemon=True).start()
+    threading.Thread(target=terrain_worker, daemon=True).start()
     threading.Thread(target=milestone_poller, daemon=True).start()
     print(f"skald {__version__} listening on :{PORT}, worlds={sorted(SERVERS)}"
           f", config={CONFIG.path or 'environment and defaults'}", flush=True)
