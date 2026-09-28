@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.10.1
+
+- **A world being drawn now says so.** Drawing takes a few minutes of one
+  core, and it used to happen inside the request that asked for it: the page
+  waited, showed an empty square, and a blank map for six minutes is
+  indistinguishable from a broken one — which is how it was reported.
+- The map page now returns at once and shows what is happening, with how far
+  along it is, and reloads itself until the picture arrives.
+- **Drawing has moved to one background worker that does one world at a
+  time.** These are threads of a single process, so the GIL gives them one
+  core between them however many the machine has: drawing three worlds at
+  once finished none of them sooner and meant none was ready until nearly
+  all were. In order, the first world is usable while the rest are coming.
+- A drawing that fails leaves nothing behind, rather than half a picture for
+  the next reader to serve as the finished one.
+
 ## 0.10.0
 
 - **Portals on the map, with their names.** A portal is an ordinary world
