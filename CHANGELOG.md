@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.14.1
+
+- **Dragging the map no longer selects half of it.** A pan swept a blue
+  highlight across every pin label and portal name it crossed, and the
+  browser would try to drag the terrain image away with it. Dragging a map
+  is dragging, not selecting.
+
 ## 0.14.0
 
 - **A legend under the map, with a checkbox for each thing on it** — portals,

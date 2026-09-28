@@ -2843,8 +2843,13 @@ MAP_PAGE = """<!doctype html>
  .tab .n{color:var(--muted);font-size:.75rem}
  /* The viewer: terrain underneath, fog over it, both the same size and
     both moved together by one transform on the plate. */
+ /* Dragging a map is dragging, not selecting. Without this a pan sweeps
+    a blue selection across every pin label and portal name it crosses, and
+    the browser tries to drag the terrain image off to somewhere. */
  .viewer{position:relative;overflow:hidden;border:1px solid var(--line);
-  border-radius:3px;background:var(--panel);aspect-ratio:1;cursor:grab;touch-action:none}
+  border-radius:3px;background:var(--panel);aspect-ratio:1;cursor:grab;
+  touch-action:none;user-select:none;-webkit-user-select:none}
+ .viewer img{-webkit-user-drag:none}
  .viewer:active{cursor:grabbing}
  .plate{position:absolute;inset:0;transform-origin:0 0}
  /* Shown in place of the terrain while it is being worked out. It sits
@@ -3057,6 +3062,9 @@ __BODY__
    }, {passive: false});
    viewer.addEventListener('pointerdown', function (e) {
      dragging = true; lastX = e.clientX; lastY = e.clientY; moved = 0;
+     // Stops the browser starting a text selection or an image drag; the
+     // stylesheet above cannot prevent the gesture, only the highlight.
+     e.preventDefault();
      viewer.setPointerCapture(e.pointerId);
    });
    viewer.addEventListener('pointermove', function (e) {
