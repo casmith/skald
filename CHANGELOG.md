@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.12.1
+
+- **The names in a huddle of portals actually appear now.** They were on a
+  `title`, which never showed: the map captures the pointer while it is
+  being dragged, so the marker never saw the event — and a phone has no
+  hover to show a title with in the first place. Tap or click a marker and
+  it lists them, on a desktop and on a phone alike.
+- Tapping empty map closes it, as does zooming, and a drag is not mistaken
+  for a tap.
+- **The map page's script is now checked for syntax.** This release nearly
+  shipped a string literal with a real newline inside it, which is a
+  JavaScript syntax error — and one bad token stops the whole script, so the
+  map would have lost its panning and zooming too. Nothing on the server
+  would have noticed: the page still returns 200.
+
 ## 0.12.0
 
 - **Portals that sit on top of each other are drawn as one.** A hub can hold
