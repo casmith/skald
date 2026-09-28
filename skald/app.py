@@ -47,6 +47,7 @@ import gzip
 import hashlib
 import html
 import json
+import math
 import os
 import re
 import struct
@@ -2623,6 +2624,36 @@ __MAPS__
 </body></html>"""
 
 
+# How close two portals have to be to be drawn as one. At the map's own
+# scale a marker covers a few hundred metres of ground, so a hub of six
+# within twenty metres is a single illegible blob -- which is what this is
+# for. Zoomed in they separate again and this stops applying.
+PORTAL_CLUSTER = 400.0
+
+
+def cluster_portals(portals, radius=PORTAL_CLUSTER):
+    """Group portals that would be drawn on top of each other.
+
+    Each goes to the nearest group whose middle is within `radius`, or
+    starts one of its own. Nearest rather than first, so a run of portals
+    does not chain into one long group by way of its neighbours.
+    """
+    groups = []
+    for hole in portals:
+        best, best_d = None, None
+        for group in groups:
+            mx = sum(g["x"] for g in group) / len(group)
+            mz = sum(g["z"] for g in group) / len(group)
+            d = math.hypot(hole["x"] - mx, hole["z"] - mz)
+            if d <= radius and (best_d is None or d < best_d):
+                best, best_d = group, d
+        if best is None:
+            groups.append([hole])
+        else:
+            best.append(hole)
+    return groups
+
+
 def render_map(names, mapped, requested, shared=None, seeds=None, fog=True,
                pins=True, portals=True, built=True):
     """The group's map.
@@ -2729,18 +2760,47 @@ def render_map(names, mapped, requested, shared=None, seeds=None, fog=True,
     if portals and world_portals:
         span = fch.MAP_SPAN
         ends = collections.Counter(p["name"] for p in world_portals if p["name"])
+        def place(x, z):
+            return ((x + span) / (2 * span) * 100,
+                    (span - z) / (2 * span) * 100)
+
         out = []
+        # Zoomed out: one marker for each huddle, saying how many and, on
+        # hover, which. Zoomed in: every portal on its own. Both are drawn
+        # and the stylesheet picks, so there is no clustering to get wrong
+        # while somebody is dragging the map about.
+        for group in cluster_portals(world_portals):
+            mx = sum(g["x"] for g in group) / len(group)
+            mz = sum(g["z"] for g in group) / len(group)
+            left, top = place(mx, mz)
+            if not 0 <= left <= 100 or not 0 <= top <= 100:
+                continue
+            named = [pin_label(g["name"]) for g in group if g["name"]]
+            unnamed = len(group) - len(named)
+            if unnamed:
+                named.append(f'{unnamed} unnamed')
+            title = html.escape("\n".join(named)).replace("\n", "&#10;")
+            count = (f'<em>{len(group)}</em>' if len(group) > 1 else "")
+            label = (f'<i>{html.escape(named[0])}</i>'
+                     if len(group) == 1 and named else "")
+            out.append(
+                f'<b class="pin portal group"'
+                f' style="left:{left:.4f}%;top:{top:.4f}%"'
+                f' title="{title}">\u25c8{count}{label}</b>')
+
         for hole in world_portals:
-            left = (hole["x"] + span) / (2 * span) * 100
-            top = (span - hole["z"]) / (2 * span) * 100
+            left, top = place(hole["x"], hole["z"])
             if not 0 <= left <= 100 or not 0 <= top <= 100:
                 continue
             name = hole["name"]
             lone = " lone" if name and ends[name] == 1 else ""
-            label_html = (f'<i>{html.escape(name)}</i>' if name else "")
+            shown = pin_label(name) if name else ""
+            label_html = f'<i>{html.escape(shown)}</i>' if shown else ""
             out.append(
-                f'<b class="pin portal{lone}"'
-                f' style="left:{left:.4f}%;top:{top:.4f}%">\u25c8{label_html}</b>')
+                f'<b class="pin portal one{lone}"'
+                f' style="left:{left:.4f}%;top:{top:.4f}%"'
+                + (f' title="{html.escape(shown)}"' if shown else "")
+                + f'>\u25c8{label_html}</b>')
         marks += '<div class="pins">' + "".join(out) + "</div>"
     over = "&over=1" if terrain else ""
     # Showing the terrain with the fog off is how you tell a wrong map from
@@ -2848,7 +2908,16 @@ MAP_PAGE = """<!doctype html>
  .pin.portal{color:#c9a3ff;font-size:14px;white-space:nowrap}
  .pin.portal i{font-style:normal;font-size:10px;margin-left:3px;
    color:#e8dcff;vertical-align:middle}
+ /* Zoomed out, the huddles; zoomed in, the portals themselves. Both are
+    in the page and this chooses, so nothing is being clustered while the
+    map is moving. */
+ .plate:not([data-close]) .pin.portal.one{display:none}
+ .plate[data-close] .pin.portal.group{display:none}
  .plate:not([data-close]) .pin.portal i{display:none}
+ /* How many are in the huddle. Hovering it names them. */
+ .pin.portal em{font-style:normal;font-size:9px;font-weight:700;
+   vertical-align:super;margin-left:1px;color:#f0e4ff}
+ .pin.portal[title]{cursor:help}
  .pin.portal.lone{color:#8d7aa8}
  .pin.portal.lone i{color:#b8abc8}
  /* The building sits over the ground and under the fog: people can only
