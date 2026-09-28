@@ -40,6 +40,7 @@ session is still open, appends a close marker of its own to
 
 Python stdlib only.
 """
+import collections
 import glob
 import gzip
 import hashlib
@@ -1365,6 +1366,9 @@ def world_names_by_uid():
 # world -> its shared map, and a per-world cache of which file it came from
 # so an unchanged save is not decompressed again every minute.
 WORLD_MAPS = {}
+# world -> its portals, and the files they were read from
+WORLD_PORTALS = {}
+_PORTAL_FILES = {}
 _CARTO_FILES = {}
 
 
@@ -1499,6 +1503,11 @@ def refresh_world_maps():
             continue
         if found:
             WORLD_MAPS[world] = found
+        try:
+            WORLD_PORTALS[world] = fch.world_portals(
+                directory, _PORTAL_FILES.setdefault(world, {}))
+        except Exception as e:                     # a save mid-write, say
+            print(f"portals for {world}: {e}", flush=True)
 
 
 def merged_map(world_uid):
@@ -2548,7 +2557,7 @@ __MAPS__
 
 
 def render_map(names, mapped, requested, shared=None, seeds=None, fog=True,
-               pins=True):
+               pins=True, portals=True):
     """The group's map.
 
     Two sources, and the first is far the better one. A world's own save
@@ -2631,20 +2640,51 @@ def render_map(names, mapped, requested, shared=None, seeds=None, fog=True,
                 f'<b class="pin {kind}{" done" if pin["crossed"] else ""}"'
                 f' style="left:{left:.4f}%;top:{top:.4f}%"{title}>{glyph}</b>')
         marks = '<div class="pins">' + "".join(out) + "</div>"
+    # Portals are few and carry names worth reading, so they get their name
+    # beside them rather than a tooltip. Two sharing a name are the two ends
+    # of one.
+    world_portals = (WORLD_PORTALS.get(pick["label"], []) if pick["table"] else [])
+    if portals and world_portals:
+        span = fch.MAP_SPAN
+        ends = collections.Counter(p["name"] for p in world_portals if p["name"])
+        out = []
+        for hole in world_portals:
+            left = (hole["x"] + span) / (2 * span) * 100
+            top = (span - hole["z"]) / (2 * span) * 100
+            if not 0 <= left <= 100 or not 0 <= top <= 100:
+                continue
+            name = hole["name"]
+            lone = " lone" if name and ends[name] == 1 else ""
+            label_html = (f'<i>{html.escape(name)}</i>' if name else "")
+            out.append(
+                f'<b class="pin portal{lone}"'
+                f' style="left:{left:.4f}%;top:{top:.4f}%">\u25c8{label_html}</b>')
+        marks += '<div class="pins">' + "".join(out) + "</div>"
     over = "&over=1" if terrain else ""
     # Showing the terrain with the fog off is how you tell a wrong map from
     # a wrongly-placed one.
     show_fog = fog and pick.get("fog", True)
-    keep = "" if pins else "&pins=0"
-    toggle = (f'<a href="/map?world={pick["key"]}&fog={"0" if fog else "1"}{keep}">'
-              f'{"hide" if fog else "show"} fog of war</a>'
-              if pick.get("fog", True) and terrain else "")
+    # Three layers, three links, and each has to carry the other two's
+    # setting -- a toggle that silently turns the others back on is worse
+    # than no toggle.
+    def layer_link(flag, on, count, what):
+        state = {"fog": fog, "pins": pins, "portals": portals}
+        state[flag] = not on
+        bits = "".join(f"&{k}=0" for k, v in state.items() if not v)
+        return (f'<a href="/map?world={pick["key"]}{bits}">'
+                f'{"hide" if on else "show"} '
+                + (f"{count} " if count else "")
+                + f'{what}</a>')
+
+    links = []
+    if pick.get("fog", True) and terrain:
+        links.append(layer_link("fog", fog, 0, "fog of war"))
     if world_pins:
-        held = "" if fog else "&fog=0"
-        toggle += (" &middot; " if toggle else "") + (
-            f'<a href="/map?world={pick["key"]}{held}'
-            f'&pins={"0" if pins else "1"}">'
-            f'{"hide" if pins else "show"} {len(world_pins)} pins</a>')
+        links.append(layer_link("pins", pins, len(world_pins), "pins"))
+    if world_portals:
+        links.append(layer_link("portals", portals, len(world_portals),
+                                "portals"))
+    toggle = " &middot; ".join(links)
     note = (" &middot; terrain drawn from the world seed; the lit part is what "
             "the group has explored" if terrain else "")
     body = (f'<p class="facts"><b>{label}</b> &middot; {share:.2f}% of the map '
@@ -2702,6 +2742,14 @@ MAP_PAGE = """<!doctype html>
  .pin.mine{color:#ffd27f}
  .pin.house{color:#cbe8a0}
  .pin.done{opacity:.45}
+ /* Portals carry their name beside them: there are few enough for that to
+    read, and the name is the whole point of a portal. */
+ .pin.portal{color:#c9a3ff;font-size:14px;white-space:nowrap}
+ .pin.portal i{font-style:normal;font-size:10px;margin-left:3px;
+   color:#e8dcff;vertical-align:middle}
+ .plate:not([data-close]) .pin.portal i{display:none}
+ .pin.portal.lone{color:#8d7aa8}
+ .pin.portal.lone i{color:#b8abc8}
  .plate img{position:absolute;inset:0;width:100%;height:100%;
   image-rendering:pixelated;display:block}
  /* Unexplored ground is not shown at all -- only where the group has been. */
@@ -2737,6 +2785,9 @@ __BODY__
      plate.style.transform = 'translate(' + x + 'px,' + y + 'px) scale(' + z + ')';
      // Undo the zoom for the pins, so a marker stays a marker.
      plate.style.setProperty('--unzoom', 1 / z);
+     // A hub can hold six portals within a few metres, so their names
+     // only appear once you are close enough for them not to pile up.
+     plate.toggleAttribute('data-close', z >= 2.5);
    }
    function zoomAbout(factor, cx, cy) {
      var next = Math.min(16, Math.max(1, z * factor));
@@ -3137,7 +3188,8 @@ class Handler(BaseHTTPRequestHandler):
                                               {w: world_metadata(w)
                                                for w in sorted(SERVERS)},
                                               params.get("fog", ["1"])[0] != "0",
-                                              params.get("pins", ["1"])[0] != "0"),
+                                              params.get("pins", ["1"])[0] != "0",
+                                              params.get("portals", ["1"])[0] != "0"),
                               "text/html; charset=utf-8")
 
         now = time.time()
