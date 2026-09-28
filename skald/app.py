@@ -2968,14 +2968,17 @@ __BODY__
      var groups = groupPins(portalData, reach);
      var html = '';
      groups.forEach(function (g) {
-       var named = g.all.filter(function (p) { return p.n; });
-       var unnamed = g.all.length - named.length;
-       var names = named.map(function (p) { return p.n; });
-       if (unnamed) names.push(unnamed + ' unnamed');
+       // Names only, never the portals themselves. Holding both in
+       // similarly spelt variables is how the label came to be handed an
+       // object instead of a string, which threw and left the map bare.
+       var names = [];
+       g.all.forEach(function (p) { if (p.n) names.push(p.n); });
+       var unnamed = g.all.length - names.length;
        var lone = (g.all.length === 1 && g.all[0].lone) ? ' lone' : '';
        var count = g.all.length > 1 ? '<em>' + g.all.length + '</em>' : '';
-       var label = (g.all.length === 1 && named.length)
-         ? '<i>' + esc(named[0]) + '</i>' : '';
+       var label = (g.all.length === 1 && names.length)
+         ? '<i>' + esc(names[0]) + '</i>' : '';
+       if (unnamed) names.push(unnamed + ' unnamed');
        html += '<b class="pin portal' + lone + '" data-names="'
          + esc(names.join('\\n')) + '" style="left:' + g.x.toFixed(4)
          + '%;top:' + g.y.toFixed(4) + '%">◈' + count + label + '</b>';
