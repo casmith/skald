@@ -1370,6 +1370,9 @@ WORLD_MAPS = {}
 # world -> its portals, and the files they were read from
 WORLD_PORTALS = {}
 _PORTAL_FILES = {}
+# world -> everywhere somebody has built, and the files it came from
+WORLD_BUILT = {}
+_BUILT_FILES = {}
 _CARTO_FILES = {}
 
 
@@ -1485,6 +1488,25 @@ def draw_terrain(world):
         return True
 
 
+# world -> (how many pieces it was drawn from, the PNG). Drawing costs a
+# fraction of a second, but the page asks for it on every load and the
+# answer only changes when somebody builds something.
+_BUILT_PNG = {}
+
+
+def built_png(world):
+    """Where people have built in this world, as a transparent overlay."""
+    points = WORLD_BUILT.get(world) or []
+    if not points:
+        return None
+    held = _BUILT_PNG.get(world)
+    if held and held[0] == len(points):
+        return held[1]
+    body = fch.construction_png(points, TERRAIN_SIZE)
+    _BUILT_PNG[world] = (len(points), body)
+    return body
+
+
 def terrain_worker():
     """Draw whatever is missing, one world at a time.
 
@@ -1548,6 +1570,11 @@ def refresh_world_maps():
                 directory, _PORTAL_FILES.setdefault(world, {}))
         except Exception as e:                     # a save mid-write, say
             print(f"portals for {world}: {e}", flush=True)
+        try:
+            WORLD_BUILT[world] = fch.world_construction(
+                directory, _BUILT_FILES.setdefault(world, {}))
+        except Exception as e:                     # a save mid-write, say
+            print(f"construction for {world}: {e}", flush=True)
 
 
 def merged_map(world_uid):
@@ -2597,7 +2624,7 @@ __MAPS__
 
 
 def render_map(names, mapped, requested, shared=None, seeds=None, fog=True,
-               pins=True, portals=True):
+               pins=True, portals=True, built=True):
     """The group's map.
 
     Two sources, and the first is far the better one. A world's own save
@@ -2723,7 +2750,8 @@ def render_map(names, mapped, requested, shared=None, seeds=None, fog=True,
     # setting -- a toggle that silently turns the others back on is worse
     # than no toggle.
     def layer_link(flag, on, count, what):
-        state = {"fog": fog, "pins": pins, "portals": portals}
+        state = {"fog": fog, "pins": pins, "portals": portals,
+                 "built": built}
         state[flag] = not on
         bits = "".join(f"&{k}=0" for k, v in state.items() if not v)
         return (f'<a href="/map?world={pick["key"]}{bits}">'
@@ -2731,6 +2759,7 @@ def render_map(names, mapped, requested, shared=None, seeds=None, fog=True,
                 + (f"{count} " if count else "")
                 + f'{what}</a>')
 
+    world_built = (WORLD_BUILT.get(pick["label"], []) if pick["table"] else [])
     links = []
     if pick.get("fog", True) and terrain:
         links.append(layer_link("fog", fog, 0, "fog of war"))
@@ -2739,6 +2768,8 @@ def render_map(names, mapped, requested, shared=None, seeds=None, fog=True,
     if world_portals:
         links.append(layer_link("portals", portals, len(world_portals),
                                 "portals"))
+    if world_built:
+        links.append(layer_link("built", built, 0, "building"))
     toggle = " &middot; ".join(links)
     note = (" &middot; terrain drawn from the world seed; the lit part is what "
             "the group has explored" if terrain else "")
@@ -2746,6 +2777,9 @@ def render_map(names, mapped, requested, shared=None, seeds=None, fog=True,
             f'seen &middot; {where}{seed_line}</p>'
             '<div class="viewer" id="viewer"><div class="plate" id="plate">'
             + terrain
+            + (f'<img class="built" src="/built.png?world={pick["key"]}"'
+               f' alt="" width="{edge}" height="{edge}">'
+               if built and world_built else "")
             + (f'<img class="fog" src="/map.png?world={pick["key"]}{over}"'
               f' alt="Explored map of {label}" width="{edge}" height="{edge}">'
                if show_fog else "")
@@ -2817,6 +2851,9 @@ MAP_PAGE = """<!doctype html>
  .plate:not([data-close]) .pin.portal i{display:none}
  .pin.portal.lone{color:#8d7aa8}
  .pin.portal.lone i{color:#b8abc8}
+ /* The building sits over the ground and under the fog: people can only
+    build where they have been, so it never needs to show through it. */
+ .built{image-rendering:auto}
  .plate img{position:absolute;inset:0;width:100%;height:100%;
   image-rendering:pixelated;display:block}
  /* Unexplored ground is not shown at all -- only where the group has been. */
@@ -3247,6 +3284,18 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Cache-Control", "public, max-age=604800")
             self.end_headers()
             return self.wfile.write(body)
+        if path == "/built.png":
+            want = params.get("world", [""])[0]
+            body = built_png(want) if want in SERVERS else None
+            if not body:
+                return self._send(404, "no building in that world", "text/plain")
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Length", str(len(body)))
+            # People build, so unlike the terrain this does change.
+            self.send_header("Cache-Control", "public, max-age=300")
+            self.end_headers()
+            return self.wfile.write(body)
         if path == "/map":
             return self._send(200, render_map(world_names_by_uid(),
                                               store.mapped_worlds(db()),
@@ -3256,7 +3305,8 @@ class Handler(BaseHTTPRequestHandler):
                                                for w in sorted(SERVERS)},
                                               params.get("fog", ["1"])[0] != "0",
                                               params.get("pins", ["1"])[0] != "0",
-                                              params.get("portals", ["1"])[0] != "0"),
+                                              params.get("portals", ["1"])[0] != "0",
+                                              params.get("built", ["1"])[0] != "0"),
                               "text/html; charset=utf-8")
 
         now = time.time()
