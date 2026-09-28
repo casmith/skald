@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.10.0
+
+- **Portals on the map, with their names.** A portal is an ordinary world
+  object rather than map data, so it is nowhere near the cartography table —
+  but it is in the same saves Skald already reads, and the name someone
+  typed on it is the most useful label a map can carry. 32 on one of these
+  worlds, 47 on another.
+- **Two portals sharing a name are the two ends of one**, and that is how
+  the read checks itself: nothing in the parsing pairs them up, so names
+  landing in pairs is evidence rather than luck. On the world this was built
+  against, all 14 names are complete pairs. A portal whose partner is gone
+  is drawn dimmer.
+- Names appear once you zoom in, because a hub can hold six portals within a
+  few metres and their labels would otherwise pile on top of each other.
+- **Toggled like the other layers**, and all three now keep each other's
+  setting rather than quietly switching the others back on.
+- Found by the hash of the prefab name, with the position a fixed distance
+  before it. Nothing in the file says that distance, so every portal in a
+  chunk has to land somewhere a portal could be — one that does not means
+  the shape is wrong, and the whole file is refused rather than trusted in
+  part.
+
 ## 0.9.0
 
 - **The map's pins, from the cartography table.** The table shares pins the
