@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.14.0
+
+- **A legend under the map, with a checkbox for each thing on it** — portals,
+  building, and the pins split by what they are: bosses, beds, mining,
+  houses, fires, places. Each says how many there are.
+- **Turning one off is immediate and does not move the map.** These were
+  links, and a link reloads the page: it came back at the top left at 1x, so
+  hiding a layer threw away the part of the map you were looking at. Now a
+  box puts a class on the map and nothing else happens — no request, no
+  redraw, and the view cannot shift.
+- The pins used to be one switch for all 519 of them. Turning off 175 mining
+  marks to see the ten bosses underneath was not possible; now it is.
+- The fog of war stays a link, because it changes what the server draws
+  rather than what the page shows.
+
 ## 0.13.1
 
 - **Portals are back.** 0.13.0 drew none at all: building a marker for a
