@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.9.0
+
+- **The map's pins, from the cartography table.** The table shares pins the
+  way it shares the ground, so every marker anyone has put on it now shows
+  on the map — 519 of them on the world this was built against, 289 with
+  names people typed themselves. Nothing is uploaded and nobody has to do
+  anything: they arrive with the map Skald already reads.
+- Crossed-off pins are drawn faded, bosses and beds get their own colour,
+  and the pins the game places itself say `Eikthyr` and `The Elder` rather
+  than `$enemy_eikthyr`.
+- **Toggle them** beside the fog of war, and the two toggles keep each
+  other's setting rather than resetting it.
+- Markers hold their size as you zoom, because a marker that grows with the
+  map stops being a marker.
+- They are found the way the map is: by insisting the record shape accounts
+  for the region **exactly**. A block that does not consume its last byte is
+  not read as pins at all, so junk after a grid yields nothing rather than
+  inventing markers.
+
 ## 0.8.0
 
 - **Real terrain, generated from the world seed.** Valheim stores no
