@@ -524,6 +524,25 @@ def set_meta(conn, key, value):
         conn.execute("INSERT OR REPLACE INTO meta (k, v) VALUES (?, ?)", (key, value))
 
 
+def drop_echoed_events(conn):
+    """Remove events that were only ever an echo of another line.
+
+    Recognised by their trailing quote and by there being a real line that
+    says the same thing. Belt and braces: an event with no twin is left
+    alone, because being unable to explain a row is not a reason to delete
+    it. Returns how many went.
+    """
+    with conn:
+        before = conn.total_changes
+        conn.execute("""
+            DELETE FROM events WHERE line LIKE '%"' AND EXISTS (
+                SELECT 1 FROM events AS real WHERE real.world = events.world
+                  AND real.ts = events.ts AND real.kind = events.kind
+                  AND real.args = events.args AND real.line <> events.line
+                  AND real.line NOT LIKE '%"')""")
+        return conn.total_changes - before
+
+
 def forget_how_far_files_were_read(conn):
     """Make every event file be read again from the start.
 

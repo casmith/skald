@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.7.1
+
+- **A line is no longer counted twice because something quoted it.** The log
+  hook announces its work by quoting the whole line it is about to write, so
+  a full server log holds every hooked line twice -- and the copy differs
+  from the original by one trailing quote, just enough to slip past the key
+  that would have caught it. A timestamp inside quotes is now read as a line
+  being quoted rather than a line being logged.
+- Deaths were the casualty: they drive the per-player table, the
+  deaths-per-hour figure and a chart. On the deployment that found this, 316
+  of 2,834 events were copies and not one was a death -- that is luck, not
+  design. Arrivals, departures and landmarks were never affected.
+- Copies already stored are removed once on upgrade, and only those with a
+  genuine twin. An unexplained row is not a reason to delete anything.
+
 ## 0.7.0
 
 - **The group's map, with nobody uploading anything.** A world's own save
