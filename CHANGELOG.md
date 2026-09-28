@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.12.0
+
+- **Portals that sit on top of each other are drawn as one.** A hub can hold
+  a dozen within twenty metres, and at the map's own scale a marker covers a
+  few hundred metres of ground — so they were one illegible blob and the
+  names could not be read at all. One marker now, with how many are in it,
+  and hovering it names them. On the world this was built against, 32
+  portals become 15 markers and the big hub collapses thirteen into one.
+- **Zoom in and they separate again**, each with its own name, as before.
+  Both sets are in the page and the stylesheet chooses between them, so
+  nothing is being regrouped while you drag the map about.
+- Each portal joins the nearest huddle rather than the first it touches — by
+  first match, a row of portals each within reach of the last chains into a
+  single group spanning kilometres.
+
 ## 0.11.0
 
 - **Where you have built, drawn as firelight.** A new map layer showing
