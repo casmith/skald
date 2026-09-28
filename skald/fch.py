@@ -383,6 +383,9 @@ def world_uid(fwl):
 # zeroes, which deflates to almost nothing, and skipping small files would
 # skip exactly the worlds whose map has only just started.
 WORLD_MAP_MIN = 256
+# How far past the grid to look for the pin count. The run of
+# 0/1 bytes can reach into the count itself, which starts small.
+_PIN_SEARCH = 8
 
 # The map texture is 2048 pixels at 12 metres each, so it reaches 12288
 # metres out -- far enough to hold the Ashlands and the Deep North, which
@@ -426,6 +429,53 @@ def world_map(directory, cache=None):
     return best
 
 
+def _table_pins(raw, at):
+    """The pins a cartography table holds, or nothing if they do not read.
+
+    They sit straight after the explored grid, and the table shares them the
+    way it shares the ground: whatever anyone has put on it. The shape is
+
+        i32 count, then per pin:
+            i64 owner, string name, f32 x, f32 y, f32 z,
+            i32 type, u8 crossed, string owner id
+
+    which is worth stating because the owner's *name* comes last, after the
+    flag, and not next to the id it belongs to.
+
+    Demanding that the count be right and that the records then consume the
+    region exactly is what tells a real pin block from a coincidence: the
+    odds of arbitrary bytes landing on the final byte are not worth
+    worrying about.
+    """
+    r = Reader(raw)
+    r.i = at
+    try:
+        count = r.i32()
+        if not 0 <= count <= MAX_PINS:
+            return None
+        pins = []
+        for _ in range(count):
+            r.i64()                          # who owns it; the id follows
+            name = r.string()
+            x, _y, z = r.f32x3()
+            kind = r.i32()
+            crossed = r.u8()
+            r.string()                       # "Steam_76561198..."
+            if crossed not in (0, 1):
+                return None
+            if not (-MAP_SPAN < x < MAP_SPAN and -MAP_SPAN < z < MAP_SPAN):
+                return None
+            if not name.isprintable():
+                return None
+            pins.append({"name": name, "x": x, "z": z, "type": kind,
+                         "crossed": bool(crossed)})
+    except (Bad, struct.error):
+        return None
+    if r.i != len(raw):
+        return None                          # did not account for every byte
+    return pins
+
+
 def _world_map_in(path):
     """The biggest explored bitmap inside one save file, if there is one."""
     try:
@@ -454,8 +504,18 @@ def _world_map_in(path):
                                 for y in range(edge - 1, -1, -1))
             packed = pack(explored)
             seen = sum(bin(b).count("1") for b in packed)
+            # The pins follow the grid. The run may have swallowed a byte or
+            # two past it -- a count that begins 00 is still 0 or 1 -- so
+            # the first offset that accounts for the region exactly wins.
+            pins = []
+            for skip in range(_PIN_SEARCH):
+                found = _table_pins(raw, run.start() + edge * edge + skip)
+                if found is not None:
+                    pins = found
+                    break
             if best is None or seen > best["seen"]:
-                best = {"edge": edge, "explored": packed, "seen": seen}
+                best = {"edge": edge, "explored": packed, "seen": seen,
+                        "pins": pins}
     return best
 
 

@@ -1455,6 +1455,33 @@ def terrain_png(world):
         return body
 
 
+# What the game's pin types mean. Only the ones these worlds actually use
+# are named; anything else falls back to a plain dot rather than guessing.
+PIN_KINDS = {
+    0: ("fire", "\u25b2"), 1: ("house", "\u2302"), 2: ("mine", "\u26cf"),
+    3: ("spot", "\u25cf"), 4: ("star", "\u2605"), 6: ("bed", "\u2691"),
+    9: ("boss", "\u2620"),
+}
+
+# Pins the game places itself carry a localisation token rather than a name.
+BOSS_NAMES = {
+    "$enemy_eikthyr": "Eikthyr",
+    "$enemy_gdking": "The Elder",
+    "$enemy_bonemass": "Bonemass",
+    "$enemy_dragon": "Moder",
+    "$enemy_goblinking": "Yagluth",
+    "$enemy_seekerqueen": "The Queen",
+    "$enemy_fader": "Fader",
+}
+
+
+def pin_label(name):
+    """A pin's name as a person would read it."""
+    if name in BOSS_NAMES:
+        return BOSS_NAMES[name]
+    return name.lstrip("$") if name.startswith("$") else name
+
+
 def refresh_world_maps():
     """Read each world's cartography table from its own save.
 
@@ -2520,7 +2547,8 @@ __MAPS__
 </body></html>"""
 
 
-def render_map(names, mapped, requested, shared=None, seeds=None, fog=True):
+def render_map(names, mapped, requested, shared=None, seeds=None, fog=True,
+               pins=True):
     """The group's map.
 
     Two sources, and the first is far the better one. A world's own save
@@ -2580,13 +2608,43 @@ def render_map(names, mapped, requested, shared=None, seeds=None, fog=True):
                      if meta["seed_name"] else f' &middot; seed <b>{meta["seed"]}</b>')
         terrain = (f'<img class="terrain" src="/terrain.png?world={pick["key"]}"'
                    f' alt="" width="{edge}" height="{edge}">')
+    # The table's pins, laid over the same square the images fill. Placed as
+    # a percentage of the plate rather than in pixels, so they follow the
+    # zoom without any arithmetic of their own.
+    world_pins = (WORLD_MAPS.get(pick["label"], {}).get("pins", [])
+                  if pick["table"] else [])
+    marks = ""
+    if pins and world_pins:
+        span = fch.MAP_SPAN
+        out = []
+        for pin in world_pins:
+            kind, glyph = PIN_KINDS.get(pin["type"], ("spot", "\u25cf"))
+            left = (pin["x"] + span) / (2 * span) * 100
+            top = (span - pin["z"]) / (2 * span) * 100
+            if not 0 <= left <= 100 or not 0 <= top <= 100:
+                continue
+            # Plenty of pins carry no name at all -- the icon was the whole
+            # point -- and an empty tooltip is worse than none.
+            name = pin_label(pin["name"])
+            title = f' title="{html.escape(name)}"' if name else ""
+            out.append(
+                f'<b class="pin {kind}{" done" if pin["crossed"] else ""}"'
+                f' style="left:{left:.4f}%;top:{top:.4f}%"{title}>{glyph}</b>')
+        marks = '<div class="pins">' + "".join(out) + "</div>"
     over = "&over=1" if terrain else ""
     # Showing the terrain with the fog off is how you tell a wrong map from
     # a wrongly-placed one.
     show_fog = fog and pick.get("fog", True)
-    toggle = (f'<a href="/map?world={pick["key"]}&fog={"0" if fog else "1"}">'
+    keep = "" if pins else "&pins=0"
+    toggle = (f'<a href="/map?world={pick["key"]}&fog={"0" if fog else "1"}{keep}">'
               f'{"hide" if fog else "show"} fog of war</a>'
               if pick.get("fog", True) and terrain else "")
+    if world_pins:
+        held = "" if fog else "&fog=0"
+        toggle += (" &middot; " if toggle else "") + (
+            f'<a href="/map?world={pick["key"]}{held}'
+            f'&pins={"0" if pins else "1"}">'
+            f'{"hide" if pins else "show"} {len(world_pins)} pins</a>')
     note = (" &middot; terrain drawn from the world seed; the lit part is what "
             "the group has explored" if terrain else "")
     body = (f'<p class="facts"><b>{label}</b> &middot; {share:.2f}% of the map '
@@ -2596,6 +2654,7 @@ def render_map(names, mapped, requested, shared=None, seeds=None, fog=True):
             + (f'<img class="fog" src="/map.png?world={pick["key"]}{over}"'
               f' alt="Explored map of {label}" width="{edge}" height="{edge}">'
                if show_fog else "")
+            + marks
             + '</div></div>'
             '<p class="facts"><button type="button" data-zoom="-1">&minus;</button> '
             '<button type="button" data-zoom="1">+</button> '
@@ -2630,6 +2689,19 @@ MAP_PAGE = """<!doctype html>
   border-radius:3px;background:var(--panel);aspect-ratio:1;cursor:grab;touch-action:none}
  .viewer:active{cursor:grabbing}
  .plate{position:absolute;inset:0;transform-origin:0 0}
+ .pins{position:absolute;inset:0}
+ /* Each pin sits at its own place on the plate, so the zoom carries it.
+    The glyph is pulled back to its own centre and kept at one size however
+    far in you are, because a marker that grows with the map stops being a
+    marker. */
+ .pin{position:absolute;transform:translate(-50%,-50%) scale(var(--unzoom,1));
+   font-size:13px;line-height:1;color:#f3e6c8;
+   text-shadow:0 0 2px #000,0 0 4px #000;pointer-events:auto;cursor:default}
+ .pin.boss{color:#ff9a76;font-size:16px}
+ .pin.bed{color:#9fd0ff}
+ .pin.mine{color:#ffd27f}
+ .pin.house{color:#cbe8a0}
+ .pin.done{opacity:.45}
  .plate img{position:absolute;inset:0;width:100%;height:100%;
   image-rendering:pixelated;display:block}
  /* Unexplored ground is not shown at all -- only where the group has been. */
@@ -2663,6 +2735,8 @@ __BODY__
    var z = 1, x = 0, y = 0, dragging = false, lastX = 0, lastY = 0;
    function apply() {
      plate.style.transform = 'translate(' + x + 'px,' + y + 'px) scale(' + z + ')';
+     // Undo the zoom for the pins, so a marker stays a marker.
+     plate.style.setProperty('--unzoom', 1 / z);
    }
    function zoomAbout(factor, cx, cy) {
      var next = Math.min(16, Math.max(1, z * factor));
@@ -3062,7 +3136,8 @@ class Handler(BaseHTTPRequestHandler):
                                               dict(WORLD_MAPS),
                                               {w: world_metadata(w)
                                                for w in sorted(SERVERS)},
-                                              params.get("fog", ["1"])[0] != "0"),
+                                              params.get("fog", ["1"])[0] != "0",
+                                              params.get("pins", ["1"])[0] != "0"),
                               "text/html; charset=utf-8")
 
         now = time.time()
