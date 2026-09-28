@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.11.0
+
+- **Where you have built, drawn as firelight.** A new map layer showing
+  every piece anyone has placed: bright where a settlement is dense, faint
+  at an outpost, dark everywhere nobody has been. Toggled like the others.
+- **It shows building, not masonry.** Valheim's own ruins and dungeons are
+  made from the same prefabs people build with, and there are far more of
+  them — on one of these worlds fifty thousand generated pieces against a
+  few thousand built ones. A piece somebody placed records who placed it and
+  a generated one does not, so that is the test. Drawn without it, the map
+  is every ruin in the world and the places people live are lost in the
+  scatter.
+- **Nothing is exaggerated.** A settlement covers the ground it covers, and
+  on a ten-kilometre world that is a small bright place in a great deal of
+  dark. The map already zooms.
+- The layer sits over the ground and under the fog of war, because people
+  can only build where they have been.
+
 ## 0.10.1
 
 - **A world being drawn now says so.** Drawing takes a few minutes of one

@@ -31,11 +31,14 @@ Layout, for anyone checking this against a file:
         i32   pin count, then per pin: string name, 3 floats, i32 type, u8 crossed
         u8    position shared publicly
 """
+import bisect
 import math
 import os
 import re
 import struct
 import zlib
+
+from skald.worldgen import stable_hash
 
 MAX_EDGE = 4096          # 2048 today; a sanity bound, not a prediction
 MAX_WORLDS = 128
@@ -615,6 +618,207 @@ def world_portals(directory, cache=None):
     if cache is not None and len(cache) > 400:
         cache.clear()
     return out
+
+
+# What a person can build. Not every buildable in the game -- it does not
+# have to be, because the creator check below is what separates building
+# from masonry, so a name missing here costs one structure rather than a
+# wrong map. Add freely.
+BUILD_PIECES = (
+    "wood_floor", "wood_floor_1x1", "wood_wall_log", "wood_wall_half",
+    "wood_wall_roof", "wood_beam", "wood_beam_1", "wood_beam_26",
+    "wood_beam_45", "wood_pole", "wood_pole4", "wood_pole_log",
+    "wood_pole_log_4", "wood_stair", "wood_stepladder", "wood_door",
+    "wood_gate", "wood_roof", "wood_roof_45", "wood_roof_top",
+    "wood_roof_icorner", "wood_roof_ocorner", "wood_ledge", "wood_fence",
+    "wood_dragon", "woodiron_beam", "woodiron_pole", "woodiron_wall",
+    "darkwood_beam", "darkwood_roof", "darkwood_roof_45",
+    "darkwood_decowall", "darkwood_arch", "stone_floor",
+    "stone_floor_2x2", "stone_wall_1x1", "stone_wall_2x1",
+    "stone_wall_4x2", "stone_arch", "stone_stair", "stone_pillar",
+    "blackmarble_floor", "blackmarble_pillar", "piece_workbench",
+    "piece_artisanstation", "piece_stonecutter", "piece_cauldron",
+    "piece_cookingstation", "piece_cookingstation_iron", "piece_oven",
+    "forge", "smelter", "charcoal_kiln", "blastfurnace", "windmill",
+    "piece_spinningwheel", "piece_magetable", "piece_preptable",
+    "piece_cartographytable", "piece_chest_wood", "piece_chest",
+    "piece_chest_private", "piece_chest_blackmetal", "piece_bed02",
+    "piece_chair", "piece_throne01", "piece_table", "piece_bench01",
+    "piece_walltorch", "piece_groundtorch", "piece_groundtorch_wood",
+    "piece_brazierceiling01", "fire_pit", "hearth", "bonfire",
+    "piece_banner01", "piece_sign", "sign", "itemstand",
+    "piece_sharpstakes", "piece_beehive", "portal_wood",
+)
+
+# A piece someone placed records who placed it. The world's own ruins and
+# dungeons are made of the same prefabs and carry no creator, and there are
+# far more of them -- on one of these worlds, fifty thousand generated
+# pieces against under three thousand built ones. Without this the map shows
+# masonry rather than settlement, and the scatter of every ruin in the world
+# drowns the places people actually live.
+CREATOR_KEY = 881008290          # GetStableHashCode("creator")
+
+# How far after a piece its creator may sit. Objects are tens of bytes, so
+# this reaches past the record's own fields without reaching the next piece.
+CREATOR_WINDOW = 250
+
+
+def _construction_in(path, prefabs):
+    """Where somebody built something, in one chunk file. [(x, z)]."""
+    try:
+        with open(path, "rb") as f:
+            blob = f.read()
+    except OSError:
+        return []
+    at, pieces = 0, []
+    for needle in prefabs:
+        at = blob.find(needle)
+        while at != -1:
+            pieces.append(at)
+            at = blob.find(needle, at + 4)
+    if not pieces:
+        return []
+    pieces.sort()
+
+    key = struct.pack("<i", CREATOR_KEY)
+    built = set()
+    at = blob.find(key)
+    while at != -1:
+        # The piece this creator belongs to is the last one before it.
+        i = bisect.bisect_left(pieces, at) - 1
+        if i >= 0 and at - pieces[i] < CREATOR_WINDOW:
+            built.add(pieces[i])
+        at = blob.find(key, at + 4)
+
+    out = []
+    for start in sorted(built):
+        if start < PORTAL_POS_BACK:
+            continue
+        x, y, z = struct.unpack_from("<3f", blob, start - PORTAL_POS_BACK)
+        # Unlike the portals, a bad point here is dropped on its own rather
+        # than condemning the file. Hundreds of prefabs are searched for
+        # instead of one, so the odd four bytes will land by chance, and
+        # throwing away a world's building over three of them would be the
+        # wrong trade.
+        if not (-MAP_SPAN < x < MAP_SPAN and -MAP_SPAN < z < MAP_SPAN):
+            continue
+        if not -1000.0 < y < 2000.0:
+            continue
+        out.append((x, z))
+    return out
+
+
+def world_construction(directory, cache=None):
+    """Everywhere somebody has built something, in one world."""
+    prefabs = [struct.pack("<i", stable_hash(n)) for n in BUILD_PIECES]
+    out = []
+    try:
+        names = sorted(os.listdir(directory))
+    except OSError:
+        return out
+    for name in names:
+        path = os.path.join(directory, name)
+        try:
+            st = os.stat(path)
+        except OSError:
+            continue
+        if not os.path.isfile(path):
+            continue
+        key = (path, st.st_size, st.st_mtime)
+        if cache is not None and key in cache:
+            found = cache[key]
+        else:
+            found = _construction_in(path, prefabs)
+            if cache is not None:
+                cache[key] = found
+        out.extend(found)
+    if cache is not None and len(cache) > 400:
+        cache.clear()
+    return out
+
+
+# The light each piece casts. Stamped rather than blurred: a blur over four
+# million pixels in Python costs seconds, and a few thousand stamps of a
+# small kernel gives the same soft edge for a few hundred thousand adds.
+_GLOW = (
+    (0, 0, 0, 1, 1, 1, 0, 0, 0),
+    (0, 1, 2, 3, 4, 3, 2, 1, 0),
+    (0, 2, 4, 7, 8, 7, 4, 2, 0),
+    (1, 3, 7, 12, 15, 12, 7, 3, 1),
+    (1, 4, 8, 15, 20, 15, 8, 4, 1),
+    (1, 3, 7, 12, 15, 12, 7, 3, 1),
+    (0, 2, 4, 7, 8, 7, 4, 2, 0),
+    (0, 1, 2, 3, 4, 3, 2, 1, 0),
+    (0, 0, 0, 1, 1, 1, 0, 0, 0),
+)
+
+# Firelight: a faint warmth at the edge of a settlement, near-white at its
+# heart. Index 0 is nothing at all and is the transparent one.
+GLOW_COLOURS = (
+    (0, 0, 0), (150, 70, 24), (180, 94, 30), (208, 120, 40),
+    (230, 150, 56), (243, 180, 88), (250, 208, 132), (253, 230, 180),
+    (255, 246, 222),
+)
+
+# The faint end has to be faint. Painted at full strength the outermost
+# ring of every stamp becomes a hard orange edge, and a single hut looks
+# like a city -- which is exactly what the first attempt did.
+GLOW_ALPHA = (0, 45, 85, 125, 160, 190, 215, 235, 255)
+
+# What counts as bright. One piece alone peaks at the kernel's own maximum,
+# so the scale has to run well past that or everything saturates and every
+# settlement is the same white blob.
+GLOW_FULL = 120
+
+
+def construction_png(points, edge, span=None):
+    """Where people have built, as a PNG that lies over the map.
+
+    Transparent everywhere nobody has built, so it can be laid over the
+    terrain the way the explored mask is. Nothing here exaggerates: a
+    settlement covers the ground it covers, and on a ten-kilometre world
+    that is a small bright place in a lot of dark.
+    """
+    span = MAP_SPAN if span is None else span
+    light = bytearray(edge * edge)
+    half = len(_GLOW) // 2
+    for x, z in points:
+        cx = int((x + span) / (2 * span) * edge)
+        cy = int((span - z) / (2 * span) * edge)
+        for dy, row in enumerate(_GLOW):
+            py = cy + dy - half
+            if not 0 <= py < edge:
+                continue
+            base = py * edge
+            for dx, w in enumerate(row):
+                if not w:
+                    continue
+                px = cx + dx - half
+                if 0 <= px < edge:
+                    at = base + px
+                    light[at] = min(255, light[at] + w)
+
+    top = len(GLOW_COLOURS) - 1
+    rows = bytearray()
+    for y in range(edge):
+        rows.append(0)                     # PNG filter: none
+        start = y * edge
+        rows += bytes(
+            0 if not v else min(top, 1 + v * (top - 1) // GLOW_FULL)
+            for v in light[start:start + edge])
+
+    def chunk(kind, body):
+        return (struct.pack(">I", len(body)) + kind + body
+                + struct.pack(">I", zlib.crc32(kind + body) & 0xFFFFFFFF))
+
+    palette = b"".join(bytes(c) for c in GLOW_COLOURS)
+    alpha = bytes(GLOW_ALPHA)
+    return (b"\x89PNG\r\n\x1a\n"
+            + chunk(b"IHDR", struct.pack(">IIBBBBB", edge, edge, 8, 3, 0, 0, 0))
+            + chunk(b"PLTE", palette)
+            + chunk(b"tRNS", alpha)
+            + chunk(b"IDAT", zlib.compress(bytes(rows), 9))
+            + chunk(b"IEND", b""))
 
 
 def world_meta(fwl):
