@@ -519,6 +519,104 @@ def _world_map_in(path):
     return best
 
 
+# Valheim names objects by a hash of the prefab name, so a portal is found
+# by looking for the four bytes of one rather than by any text. The tests
+# check these against the hash function rather than trusting the numbers.
+PORTAL_PREFAB = -661882940       # GetStableHashCode("portal_wood")
+PORTAL_TAG_KEY = 696029674       # GetStableHashCode("tag")
+
+# The object's position sits twelve bytes before its prefab hash. Nothing
+# in the file says so, so every portal in a chunk has to land somewhere a
+# portal could be or the chunk is not read at all.
+PORTAL_POS_BACK = 12
+MAX_PORTALS = 4000
+PORTAL_TAG_MAX = 120
+
+
+def _portals_in(path):
+    """Every portal in one chunk file, or None if it holds none.
+
+    Returns [{"name", "x", "y", "z"}].
+    """
+    try:
+        with open(path, "rb") as f:
+            blob = f.read()
+    except OSError:
+        return None
+    needle = struct.pack("<i", PORTAL_PREFAB)
+    tag_key = struct.pack("<i", PORTAL_TAG_KEY)
+    at, offsets = blob.find(needle), []
+    while at != -1:
+        offsets.append(at)
+        at = blob.find(needle, at + 4)
+    if not offsets or len(offsets) > MAX_PORTALS:
+        return None
+
+    found = []
+    for n, start in enumerate(offsets):
+        if start < PORTAL_POS_BACK:
+            return None
+        x, y, z = struct.unpack_from("<3f", blob, start - PORTAL_POS_BACK)
+        # A portal has to be somewhere a portal could be. One that is not
+        # says the shape is wrong, and a wrong shape anywhere means none of
+        # them can be trusted -- so the whole chunk is refused.
+        if not (-MAP_SPAN < x < MAP_SPAN and -MAP_SPAN < z < MAP_SPAN):
+            return None
+        if not -1000.0 < y < 2000.0:
+            return None
+        # Its tag, if it has one, lies between it and the next portal.
+        end = (offsets[n + 1] - PORTAL_POS_BACK
+               if n + 1 < len(offsets) else len(blob))
+        name = ""
+        key_at = blob.find(tag_key, start, end)
+        if key_at != -1:
+            r = Reader(blob)
+            r.i = key_at + 4
+            try:
+                text = r.string()
+                if len(text) <= PORTAL_TAG_MAX and text.isprintable():
+                    name = text
+            except (Bad, struct.error, UnicodeDecodeError):
+                name = ""
+        found.append({"name": name, "x": x, "y": y, "z": z})
+    return found
+
+
+def world_portals(directory, cache=None):
+    """Every portal in a world, from its save directory.
+
+    Portals are ordinary world objects rather than map data, so they are not
+    where the cartography table is -- but they are in the same saves Skald
+    already reads, and a portal with a name on it is the most useful label a
+    map can carry. Two portals sharing a name are the two ends of one.
+    """
+    out = []
+    try:
+        names = sorted(os.listdir(directory))
+    except OSError:
+        return out
+    for name in names:
+        path = os.path.join(directory, name)
+        try:
+            st = os.stat(path)
+        except OSError:
+            continue
+        if not os.path.isfile(path):
+            continue
+        key = (path, st.st_size, st.st_mtime)
+        if cache is not None and key in cache:
+            found = cache[key]
+        else:
+            found = _portals_in(path)
+            if cache is not None:
+                cache[key] = found
+        if found:
+            out.extend(found)
+    if cache is not None and len(cache) > 400:
+        cache.clear()
+    return out
+
+
 def world_meta(fwl):
     """A world's name, seed and id, from its .fwl.
 
