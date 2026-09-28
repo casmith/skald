@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.13.0
+
+- **Portal markers now group by how far apart they *look*, and regroup as
+  you zoom.** Two portals twenty metres apart are four screen pixels apart
+  at 2.5x and a comfortable gap at 16x, so where one marker stops and the
+  next begins cannot be decided when the page is built — and deciding it in
+  metres was why a hub stayed an unreadable blob no matter how far in you
+  went.
+- **Tapping a huddle names everything under it.** Before, past 2.5x the
+  grouped markers were swapped for one marker per portal; they still sat on
+  top of each other, but each now knew only its own name, so tapping told
+  you about exactly one portal. That is the bug.
+- Zoom in and groups split where the gap is real; zoom out and they merge
+  again. A marker alone still shows its name beside it.
+- The grouping is now tested by running the page's own script, rather than a
+  copy of it kept in Python.
+
 ## 0.12.1
 
 - **The names in a huddle of portals actually appear now.** They were on a
