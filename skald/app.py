@@ -60,6 +60,7 @@ from skald import __version__
 from skald import auth
 from skald import config as configuration
 from skald import fch
+from skald import worldgen
 from skald import notify
 from skald import store
 from skald import weather
@@ -1367,6 +1368,93 @@ WORLD_MAPS = {}
 _CARTO_FILES = {}
 
 
+TERRAIN_SIZE = 2048          # the resolution Valheim's own map uses
+# Drawing a world takes minutes and is pure CPU. The server is threaded, so
+# without this every request that arrives during a drawing starts another
+# one of its own -- and they then compete for the same core and all of them
+# take longer. One drawing per seed; everyone else waits for it and reads
+# the file it leaves.
+_TERRAIN_LOCKS = {}
+_TERRAIN_LOCKS_GUARD = threading.Lock()
+
+
+def _terrain_lock(key):
+    with _TERRAIN_LOCKS_GUARD:
+        return _TERRAIN_LOCKS.setdefault(key, threading.Lock())
+
+WORLD_SEEDS = {}             # world -> {"seed", "seed_name", "uid"}
+
+
+def world_metadata(world):
+    """A world's seed, from the metadata file beside its save.
+
+    Two spellings exist: `.fwl` beside the world directory, and `.fwl2`
+    inside it for saves written in the newer chunked format. Worlds of both
+    kinds are sitting on the same server here, so both are looked for.
+    """
+    if world in WORLD_SEEDS:
+        return WORLD_SEEDS[world]
+    root = os.path.join(SAVES_ROOT, world, "worlds_local")
+    candidates = []
+    for pattern in (os.path.join(root, "*.fwl"),
+                    os.path.join(root, world, "*.fwl2")):
+        candidates += glob.glob(pattern)
+    for path in sorted(candidates, key=os.path.getmtime, reverse=True):
+        try:
+            with open(path, "rb") as f:
+                meta = fch.world_meta(f.read())
+        except (OSError, fch.Bad, struct.error):
+            continue
+        WORLD_SEEDS[world] = meta
+        return meta
+    return None
+
+
+def terrain_png(world):
+    """The world's terrain, drawn from its seed. Generated once, then kept.
+
+    Valheim stores no terrain -- it regenerates it from the seed, which is
+    why a ten-kilometre world fits in a few megabytes -- so this is the only
+    way to draw one, and it takes about a minute. The result cannot change
+    for a given seed, so it is written next to the database and read from
+    there ever after -- until the way we draw it changes, which is what
+    worldgen.MODEL in the name is for.
+    """
+    meta = world_metadata(world)
+    if not meta:
+        return None
+    path = os.path.join(
+        DATA_DIR,
+        f"terrain-{meta['seed']}-{TERRAIN_SIZE}-{int(worldgen.MAP_SPAN)}"
+        f"-v{worldgen.MODEL}.png")
+    try:
+        with open(path, "rb") as f:
+            return f.read()
+    except OSError:
+        pass
+    with _terrain_lock(path):
+        # Someone may have drawn it while we waited for the lock.
+        try:
+            with open(path, "rb") as f:
+                return f.read()
+        except OSError:
+            pass
+        print(f"drawing {world} from seed {meta['seed']}; this happens once",
+              flush=True)
+        started = time.time()
+        body = worldgen.render(worldgen.World(meta["seed"]), TERRAIN_SIZE)
+        try:
+            # Through a temporary name: a half-written file is still a file,
+            # and the next reader would serve it as the finished picture.
+            with open(path + ".part", "wb") as f:
+                f.write(body)
+            os.replace(path + ".part", path)
+        except OSError as e:
+            print(f"could not keep the terrain for {world}: {e}", flush=True)
+        print(f"drew {world} in {time.time() - started:.0f}s", flush=True)
+        return body
+
+
 def refresh_world_maps():
     """Read each world's cartography table from its own save.
 
@@ -2432,7 +2520,7 @@ __MAPS__
 </body></html>"""
 
 
-def render_map(names, mapped, requested, shared=None):
+def render_map(names, mapped, requested, shared=None, seeds=None, fog=True):
     """The group's map.
 
     Two sources, and the first is far the better one. A world's own save
@@ -2441,13 +2529,21 @@ def render_map(names, mapped, requested, shared=None):
     in worlds that have no table, or that nobody has shared to it.
     """
     shared = shared or {}
-    entries = [{"key": world, "label": world, "n": None,
-                "seen": m["seen"], "edge": m["edge"], "table": True}
-               for world, m in sorted(shared.items())]
+    seeds = seeds or {}
+    # Every world we can draw gets a tab, whether or not anyone has shared
+    # a map of it: the terrain alone is worth looking at, and a world
+    # missing from the list reads as broken rather than as unexplored.
+    entries = []
+    for world in sorted(set(shared) | {w for w, m in seeds.items() if m}):
+        m = shared.get(world)
+        entries.append({"key": world, "label": world, "n": None,
+                        "seen": m["seen"] if m else 0,
+                        "edge": m["edge"] if m else TERRAIN_SIZE,
+                        "table": True, "fog": bool(m)})
     entries += [{"key": str(m["world_uid"]),
                  "label": names.get(m["world_uid"], str(m["world_uid"])),
                  "n": m["people"], "seen": None, "edge": m["edge"],
-                 "table": False}
+                 "table": False, "fog": True}
                 for m in sorted(mapped, key=lambda m: -m["newest"])]
     if not entries:
         return MAP_PAGE.replace("__TABS__", "").replace("__BODY__",
@@ -2466,7 +2562,9 @@ def render_map(names, mapped, requested, shared=None):
     if pick["table"]:
         seen, edge = pick["seen"], pick["edge"]
         where = ("from this world&rsquo;s cartography table &mdash; everything "
-                 "anyone has shared to it")
+                 "anyone has shared to it" if pick["fog"] else
+                 "nobody has shared a map of this one yet &mdash; build a "
+                 "cartography table and it appears here")
     else:
         merged = merged_map(int(pick["key"]))
         seen, edge = merged["seen"], merged["edge"]
@@ -2475,10 +2573,35 @@ def render_map(names, mapped, requested, shared=None):
                  f'merged &middot; {len(merged["pins"])} pins')
     share = seen / (edge ** 2) * 100 if edge else 0
     label = html.escape(pick["label"])
+    meta = seeds.get(pick["label"]) if pick["table"] else None
+    seed_line = terrain = ""
+    if meta:
+        seed_line = (f' &middot; seed <b>{html.escape(meta["seed_name"])}</b>'
+                     if meta["seed_name"] else f' &middot; seed <b>{meta["seed"]}</b>')
+        terrain = (f'<img class="terrain" src="/terrain.png?world={pick["key"]}"'
+                   f' alt="" width="{edge}" height="{edge}">')
+    over = "&over=1" if terrain else ""
+    # Showing the terrain with the fog off is how you tell a wrong map from
+    # a wrongly-placed one.
+    show_fog = fog and pick.get("fog", True)
+    toggle = (f'<a href="/map?world={pick["key"]}&fog={"0" if fog else "1"}">'
+              f'{"hide" if fog else "show"} fog of war</a>'
+              if pick.get("fog", True) and terrain else "")
+    note = (" &middot; terrain drawn from the world seed; the lit part is what "
+            "the group has explored" if terrain else "")
     body = (f'<p class="facts"><b>{label}</b> &middot; {share:.2f}% of the map '
-            f'seen &middot; {where}</p>'
-            f'<img class="map" src="/map.png?world={pick["key"]}" '
-            f'alt="Explored map of {label}" width="{edge}" height="{edge}">')
+            f'seen &middot; {where}{seed_line}</p>'
+            '<div class="viewer" id="viewer"><div class="plate" id="plate">'
+            + terrain
+            + (f'<img class="fog" src="/map.png?world={pick["key"]}{over}"'
+              f' alt="Explored map of {label}" width="{edge}" height="{edge}">'
+               if show_fog else "")
+            + '</div></div>'
+            '<p class="facts"><button type="button" data-zoom="-1">&minus;</button> '
+            '<button type="button" data-zoom="1">+</button> '
+            '<button type="button" data-zoom="0">reset</button>'
+            ' &middot; drag to pan, wheel to zoom'
+            + (" &middot; " + toggle if toggle else "") + note + '</p>')
     return MAP_PAGE.replace("__TABS__", tabs).replace("__BODY__", body)
 
 
@@ -2501,8 +2624,21 @@ MAP_PAGE = """<!doctype html>
   font-size:.85rem;color:var(--muted);background:var(--panel)}
  .tab.on{border-color:var(--bronze);color:var(--gold)}
  .tab .n{color:var(--muted);font-size:.75rem}
- .map{display:block;width:100%;height:auto;image-rendering:pixelated;
-  border:1px solid var(--line);border-radius:3px;background:var(--panel)}
+ /* The viewer: terrain underneath, fog over it, both the same size and
+    both moved together by one transform on the plate. */
+ .viewer{position:relative;overflow:hidden;border:1px solid var(--line);
+  border-radius:3px;background:var(--panel);aspect-ratio:1;cursor:grab;touch-action:none}
+ .viewer:active{cursor:grabbing}
+ .plate{position:absolute;inset:0;transform-origin:0 0}
+ .plate img{position:absolute;inset:0;width:100%;height:100%;
+  image-rendering:pixelated;display:block}
+ /* Unexplored ground is not shown at all -- only where the group has been. */
+ /* The fog is painted, not blended: everywhere unexplored is the panel's
+    own colour, everywhere seen is transparent. */
+ .fog{}
+ button{font:inherit;font-size:.82rem;color:var(--gold-dim);background:var(--panel);
+  cursor:pointer;border:1px solid var(--line);border-radius:3px;padding:.1rem .6rem}
+ button:hover{border-color:var(--bronze);color:var(--gold)}
  .empty{background:var(--panel);border:1px solid var(--line);border-radius:3px;
   padding:.9rem 1rem;color:var(--muted)}
 </style></head><body>
@@ -2516,6 +2652,60 @@ __BODY__
  leaves the server. For a world without a table, an uploaded character works too &mdash;
  only its explored mask and pins are kept, because nothing else in the file is ever
  parsed.</p>
+<script>
+ // Pan and zoom, in the least code that behaves properly: one transform on
+ // the plate, and the wheel zooms about the pointer rather than the corner,
+ // which is the difference between a map you can read and one you fight.
+ (function () {
+   var viewer = document.getElementById('viewer');
+   var plate = document.getElementById('plate');
+   if (!viewer || !plate) return;
+   var z = 1, x = 0, y = 0, dragging = false, lastX = 0, lastY = 0;
+   function apply() {
+     plate.style.transform = 'translate(' + x + 'px,' + y + 'px) scale(' + z + ')';
+   }
+   function zoomAbout(factor, cx, cy) {
+     var next = Math.min(16, Math.max(1, z * factor));
+     if (next === z) return;
+     // Keep the point under the cursor where it is.
+     x = cx - (cx - x) * (next / z);
+     y = cy - (cy - y) * (next / z);
+     z = next;
+     clamp();
+     apply();
+   }
+   function clamp() {
+     var size = viewer.clientWidth;
+     var span = size * (z - 1);
+     x = Math.min(0, Math.max(-span, x));
+     y = Math.min(0, Math.max(-span, y));
+   }
+   viewer.addEventListener('wheel', function (e) {
+     e.preventDefault();
+     var r = viewer.getBoundingClientRect();
+     zoomAbout(e.deltaY < 0 ? 1.25 : 0.8, e.clientX - r.left, e.clientY - r.top);
+   }, {passive: false});
+   viewer.addEventListener('pointerdown', function (e) {
+     dragging = true; lastX = e.clientX; lastY = e.clientY;
+     viewer.setPointerCapture(e.pointerId);
+   });
+   viewer.addEventListener('pointermove', function (e) {
+     if (!dragging) return;
+     x += e.clientX - lastX; y += e.clientY - lastY;
+     lastX = e.clientX; lastY = e.clientY;
+     clamp(); apply();
+   });
+   viewer.addEventListener('pointerup', function () { dragging = false; });
+   document.querySelectorAll('[data-zoom]').forEach(function (b) {
+     b.addEventListener('click', function () {
+       var d = +b.dataset.zoom, mid = viewer.clientWidth / 2;
+       if (d === 0) { z = 1; x = 0; y = 0; apply(); return; }
+       zoomAbout(d > 0 ? 1.5 : 1 / 1.5, mid, mid);
+     });
+   });
+   apply();
+ })();
+</script>
 </body></html>"""
 
 
@@ -2837,18 +3027,42 @@ class Handler(BaseHTTPRequestHandler):
                 merged = None
             if not merged:
                 return self._send(404, "no map for that world", "text/plain")
-            body = fch.png(merged["bits"], merged["edge"])
+            # Over terrain the fog is a multiply mask, so explored ground has
+            # to be white to leave the colour beneath it alone; on its own it
+            # is a picture, and parchment on dark reads better.
+            if params.get("over", [""])[0]:
+                # Over terrain: paint the unexplored world out in the panel's
+                # own colour and let the explored part through.
+                colours, alpha = ((28, 22, 16), (0, 0, 0)), (255, 0)
+            else:
+                colours, alpha = ((26, 20, 14), (214, 178, 116)), None
+            body = fch.png(merged["bits"], merged["edge"], colours, alpha)
             self.send_response(200)
             self.send_header("Content-Type", "image/png")
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-cache")
             self.end_headers()
             return self.wfile.write(body)
+        if path == "/terrain.png":
+            want = params.get("world", [""])[0]
+            body = terrain_png(want) if want in SERVERS else None
+            if not body:
+                return self._send(404, "no terrain for that world", "text/plain")
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Length", str(len(body)))
+            # Terrain cannot change for a seed, so let a browser keep it.
+            self.send_header("Cache-Control", "public, max-age=604800")
+            self.end_headers()
+            return self.wfile.write(body)
         if path == "/map":
             return self._send(200, render_map(world_names_by_uid(),
                                               store.mapped_worlds(db()),
                                               params.get("world", [""])[0],
-                                              dict(WORLD_MAPS)),
+                                              dict(WORLD_MAPS),
+                                              {w: world_metadata(w)
+                                               for w in sorted(SERVERS)},
+                                              params.get("fog", ["1"])[0] != "0"),
                               "text/html; charset=utf-8")
 
         now = time.time()
