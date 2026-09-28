@@ -2755,7 +2755,9 @@ def render_map(names, mapped, requested, shared=None, seeds=None, fog=True):
                 "n": pin_label(name) if name else "",
                 "lone": bool(name) and ends[name] == 1,
             })
-        marks += ('<div class="pins portals" id="portals" data-portals="'
+        marks += ('<svg class="links" id="links" viewBox="0 0 100 100"'
+                  ' preserveAspectRatio="none"></svg>'
+                  '<div class="pins portals" id="portals" data-portals="'
                   + html.escape(json.dumps(holes, separators=(",", ":")))
                   + '"></div>')
     over = "&over=1" if terrain else ""
@@ -2886,6 +2888,12 @@ MAP_PAGE = """<!doctype html>
  .plate.off-mine .pin.mine, .plate.off-house .pin.house,
  .plate.off-fire .pin.fire, .plate.off-star .pin.star,
  .plate.off-spot .pin.spot{display:none}
+ /* Where a portal leads. Drawn on the plate so the lines pan and zoom
+    with everything else; the stroke does not thicken as you go in. */
+ .links{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;
+   overflow:visible}
+ .links line{stroke:#c9a3ff;stroke-width:1.5;stroke-opacity:.85;
+   stroke-dasharray:4 3;vector-effect:non-scaling-stroke}
  .pins{position:absolute;inset:0}
  /* Each pin sits at its own place on the plate, so the zoom carries it.
     The glyph is pulled back to its own centre and kept at one size however
@@ -3005,7 +3013,12 @@ __BODY__
    if (portalBox) {
      try { portalData = JSON.parse(portalBox.dataset.portals); } catch (e) {}
    }
+   // Each portal remembers its own place in the list, so a marker can
+   // name the ones it stands for.
+   portalData.forEach(function (h, i) { h.i = i; });
    var GAP = 22;                 // screen pixels; under this they are one
+   var shown = [], whereOf = {};
+   var links = document.getElementById('links');
    var lastKey = '';
    function drawPortals() {
      if (!portalBox || !portalData.length) return;
@@ -3015,8 +3028,16 @@ __BODY__
      if (key === lastKey) return;   // same zoom, same grouping
      lastKey = key;
      var groups = groupPins(portalData, reach);
+     shown = groups;
+     // Which marker each portal is currently inside, so a line can run
+     // between the markers you can actually see rather than to a portal
+     // hidden under one.
+     whereOf = {};
+     groups.forEach(function (g, gi) {
+       g.all.forEach(function (p) { whereOf[p.i] = gi; });
+     });
      var html = '';
-     groups.forEach(function (g) {
+     groups.forEach(function (g, gi) {
        // Names only, never the portals themselves. Holding both in
        // similarly spelt variables is how the label came to be handed an
        // object instead of a string, which threw and left the map bare.
@@ -3028,11 +3049,14 @@ __BODY__
        var label = (g.all.length === 1 && names.length)
          ? '<i>' + esc(names[0]) + '</i>' : '';
        if (unnamed) names.push(unnamed + ' unnamed');
-       html += '<b class="pin portal' + lone + '" data-names="'
+       html += '<b class="pin portal' + lone + '" data-g="' + gi
+         + '" data-names="'
          + esc(names.join('\\n')) + '" style="left:' + g.x.toFixed(4)
          + '%;top:' + g.y.toFixed(4) + '%">◈' + count + label + '</b>';
      });
      portalBox.innerHTML = html;
+     // The markers just moved, so any line between them is stale.
+     if (links) links.innerHTML = '';
    }
    function esc(t) {
      return t.split('&').join('&amp;').split('<').join('&lt;')
@@ -3089,6 +3113,7 @@ __BODY__
        el = el.parentElement;
      }
      if (!el || !el.dataset || !el.dataset.names) return hideTip();
+     drawLinks(el.dataset.g);
      var names = el.dataset.names.split('\\n');
      tip.innerHTML = '';
      names.forEach(function (n) {
@@ -3107,7 +3132,35 @@ __BODY__
      tip.style.left = left + 'px';
      tip.style.top = top + 'px';
    }
-   function hideTip() { tip.hidden = true; }
+   function hideTip() {
+     tip.hidden = true;
+     if (links) links.innerHTML = '';
+   }
+
+   // Where this marker's portals lead. Valheim stores no link between the
+   // two ends -- the save holds a tag and nothing else, and the game pairs
+   // them by it at run time -- so the tag is the pairing, and on these
+   // worlds no tag is used more than twice, which makes it exact rather
+   // than a guess.
+   function drawLinks(gi) {
+     if (!links) return;
+     links.innerHTML = '';
+     var group = shown[+gi];
+     if (!group) return;
+     var wanted = {};
+     group.all.forEach(function (p) { if (p.n) wanted[p.n] = true; });
+     var drawn = {}, out = '';
+     portalData.forEach(function (h) {
+       if (!h.n || !wanted[h.n]) return;
+       var other = whereOf[h.i];
+       if (other === undefined || other === +gi || drawn[other]) return;
+       drawn[other] = true;
+       var to = shown[other];
+       out += '<line x1="' + group.x.toFixed(3) + '" y1="' + group.y.toFixed(3)
+         + '" x2="' + to.x.toFixed(3) + '" y2="' + to.y.toFixed(3) + '"/>';
+     });
+     links.innerHTML = out;
+   }
    document.querySelectorAll('[data-zoom]').forEach(function (b) {
      b.addEventListener('click', function () {
        var d = +b.dataset.zoom, mid = viewer.clientWidth / 2;
