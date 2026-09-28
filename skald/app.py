@@ -2779,14 +2779,18 @@ def render_map(names, mapped, requested, shared=None, seeds=None, fog=True,
             unnamed = len(group) - len(named)
             if unnamed:
                 named.append(f'{unnamed} unnamed')
-            title = html.escape("\n".join(named)).replace("\n", "&#10;")
+            # Carried as data, not as `title`: the viewer captures the
+            # pointer while the map is being moved so the marker never sees
+            # the event, and a phone has no hover to show a title with at
+            # all. The script reads this and draws its own.
+            listing = html.escape("\n".join(named))
             count = (f'<em>{len(group)}</em>' if len(group) > 1 else "")
             label = (f'<i>{html.escape(named[0])}</i>'
                      if len(group) == 1 and named else "")
             out.append(
-                f'<b class="pin portal group"'
+                f'<b class="pin portal group" data-names="{listing}"'
                 f' style="left:{left:.4f}%;top:{top:.4f}%"'
-                f' title="{title}">\u25c8{count}{label}</b>')
+                f'>\u25c8{count}{label}</b>')
 
         for hole in world_portals:
             left, top = place(hole["x"], hole["z"])
@@ -2799,7 +2803,7 @@ def render_map(names, mapped, requested, shared=None, seeds=None, fog=True,
             out.append(
                 f'<b class="pin portal one{lone}"'
                 f' style="left:{left:.4f}%;top:{top:.4f}%"'
-                + (f' title="{html.escape(shown)}"' if shown else "")
+                + (f' data-names="{html.escape(shown)}"' if shown else "")
                 + f'>\u25c8{label_html}</b>')
         marks += '<div class="pins">' + "".join(out) + "</div>"
     over = "&over=1" if terrain else ""
@@ -2917,7 +2921,16 @@ MAP_PAGE = """<!doctype html>
  /* How many are in the huddle. Hovering it names them. */
  .pin.portal em{font-style:normal;font-size:9px;font-weight:700;
    vertical-align:super;margin-left:1px;color:#f0e4ff}
- .pin.portal[title]{cursor:help}
+ .pin.portal[data-names]{cursor:pointer}
+ /* What is in a huddle, said properly rather than left to a tooltip the
+    browser will not show while the pointer is captured and a phone does
+    not have at all. */
+ .tip{position:absolute;z-index:5;display:flex;flex-direction:column;gap:1px;
+   max-width:15em;padding:.45em .6em;border-radius:6px;
+   background:#17130fee;border:1px solid #6b5a44;
+   box-shadow:0 4px 14px #0009;font-size:12px;line-height:1.45;
+   color:#f3e6c8;pointer-events:none}
+ .tip span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
  .pin.portal.lone{color:#8d7aa8}
  .pin.portal.lone i{color:#b8abc8}
  /* The building sits over the ground and under the fog: people can only
@@ -2953,7 +2966,11 @@ __BODY__
    var viewer = document.getElementById('viewer');
    var plate = document.getElementById('plate');
    if (!viewer || !plate) return;
-   var z = 1, x = 0, y = 0, dragging = false, lastX = 0, lastY = 0;
+   var z = 1, x = 0, y = 0, dragging = false, lastX = 0, lastY = 0, moved = 0;
+   var tip = document.createElement('div');
+   tip.className = 'tip';
+   tip.hidden = true;
+   viewer.appendChild(tip);
    function apply() {
      plate.style.transform = 'translate(' + x + 'px,' + y + 'px) scale(' + z + ')';
      // Undo the zoom for the pins, so a marker stays a marker.
@@ -2971,6 +2988,7 @@ __BODY__
      z = next;
      clamp();
      apply();
+     hideTip();
    }
    function clamp() {
      var size = viewer.clientWidth;
@@ -2984,16 +3002,50 @@ __BODY__
      zoomAbout(e.deltaY < 0 ? 1.25 : 0.8, e.clientX - r.left, e.clientY - r.top);
    }, {passive: false});
    viewer.addEventListener('pointerdown', function (e) {
-     dragging = true; lastX = e.clientX; lastY = e.clientY;
+     dragging = true; lastX = e.clientX; lastY = e.clientY; moved = 0;
      viewer.setPointerCapture(e.pointerId);
    });
    viewer.addEventListener('pointermove', function (e) {
      if (!dragging) return;
+     moved += Math.abs(e.clientX - lastX) + Math.abs(e.clientY - lastY);
      x += e.clientX - lastX; y += e.clientY - lastY;
      lastX = e.clientX; lastY = e.clientY;
      clamp(); apply();
    });
-   viewer.addEventListener('pointerup', function () { dragging = false; });
+   viewer.addEventListener('pointerup', function (e) {
+     dragging = false;
+     // A tap, not a drag. The pointer is captured by the viewer while the
+     // map is being moved, so the marker never sees the event itself and a
+     // title attribute would never fire -- and on a phone it would never
+     // fire anyway, there being no hover. So find what was under the
+     // finger and say so properly.
+     if (moved < 8) tapped(e.clientX, e.clientY);
+   });
+   function tapped(cx, cy) {
+     var el = document.elementFromPoint(cx, cy);
+     while (el && el !== plate && !(el.dataset && el.dataset.names)) {
+       el = el.parentElement;
+     }
+     if (!el || !el.dataset || !el.dataset.names) return hideTip();
+     var names = el.dataset.names.split('\\n');
+     tip.innerHTML = '';
+     names.forEach(function (n) {
+       var row = document.createElement('span');
+       row.textContent = n;
+       tip.appendChild(row);
+     });
+     var vr = viewer.getBoundingClientRect(), mr = el.getBoundingClientRect();
+     tip.hidden = false;
+     // Above the marker by default, below it when there is no room, and
+     // never off either side.
+     var left = mr.left + mr.width / 2 - vr.left - tip.offsetWidth / 2;
+     left = Math.max(4, Math.min(viewer.clientWidth - tip.offsetWidth - 4, left));
+     var top = mr.top - vr.top - tip.offsetHeight - 8;
+     if (top < 4) top = mr.bottom - vr.top + 8;
+     tip.style.left = left + 'px';
+     tip.style.top = top + 'px';
+   }
+   function hideTip() { tip.hidden = true; }
    document.querySelectorAll('[data-zoom]').forEach(function (b) {
      b.addEventListener('click', function () {
        var d = +b.dataset.zoom, mid = viewer.clientWidth / 2;
