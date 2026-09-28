@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.13.1
+
+- **Portals are back.** 0.13.0 drew none at all: building a marker for a
+  lone named portal handed a label the portal itself instead of its name,
+  which threw and stopped the drawing before a single marker existed.
+- Two variables a letter apart — one holding portals, one holding their
+  names — were the whole of it. There is now only the one.
+- **The script is now run in the tests, not just parsed.** The grouping had
+  its own tests and they passed while the map showed nothing, because the
+  fault was in the marker-building around it. The tests execute the page's
+  script against a stub of the few browser calls it makes and check markers
+  come out.
+
 ## 0.13.0
 
 - **Portal markers now group by how far apart they *look*, and regroup as
