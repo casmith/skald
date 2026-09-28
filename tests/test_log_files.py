@@ -160,3 +160,68 @@ def test_unchanged_patterns_do_not_re_read(tracker):
     app.ingest_events()
     assert app.catch_up_if_patterns_changed() is False
     assert app.ingest_events() == 0
+
+
+# --- lines that are only an echo of another line -------------------------
+
+ECHO = ('Sep 26 12:00:00 supervisord: valheim-server I0926 12:00:00.519050  '
+        '23382 main.go:241] Running hook "cat >> \\"/events/${WORLD_NAME}.log\\"" '
+        'for "%s"')
+
+
+def test_a_quoted_line_is_not_a_second_event(tracker):
+    """The hook runner announces its work by quoting the whole line it is
+    running, so a full log holds every hooked line twice. The copy differs
+    by a trailing quote -- just enough to slip past the primary key and be
+    counted as a second death."""
+    T = 1_800_000_000
+    death = f"{stamp(T)}: Got character ZDOID from {ALFR} : 0:0"
+    path = tracker.dirs["events"] / f"{WORLD}.log"
+    path.write_text("\n".join([
+        f"{stamp(T - 60)}: Got connection SteamID 76561190000000001",
+        f"{stamp(T - 40)}: Got character ZDOID from {ALFR} : 5:1",
+        death,
+        ECHO % death,                      # the same death, quoted
+    ]) + "\n")
+    app._CACHE.update(sig=None, history=None)
+    app.ingest_events()
+    assert len(app.history()["deaths"]) == 1, "the echo was counted as a death"
+
+
+def test_the_real_line_is_still_read(tracker):
+    """Guarding against echoes must not drop the thing being echoed."""
+    T = 1_800_000_000
+    path = tracker.dirs["events"] / f"{WORLD}.log"
+    path.write_text(f"{stamp(T)}: Got connection SteamID 76561190000000001\n")
+    app._CACHE.update(sig=None, history=None)
+    app.ingest_events()
+    conn = app.db()
+    assert conn.execute("SELECT count(*) FROM events WHERE kind = 'connect'"
+                        ).fetchone()[0] == 1
+
+
+def test_copies_stored_before_this_are_cleared_out(tracker):
+    """An upgrade has to undo the double counting already in the database."""
+    from skald import store
+    T = 1_800_000_000
+    conn = app.db()
+    real = f"{stamp(T)}: Got character ZDOID from {ALFR} : 0:0"
+    for text in (real, real + '"'):
+        store.add_event(conn, WORLD, text, T, 2, "character", (ALFR, "0", "0"))
+    assert conn.execute("SELECT count(*) FROM events").fetchone()[0] == 2
+    assert app.tidy_echoed_events() == 1
+    assert conn.execute("SELECT count(*) FROM events").fetchone()[0] == 1
+    # And only once: it must not run on every poll.
+    assert app.tidy_echoed_events() == 0
+
+
+def test_an_unexplained_quoted_line_is_left_alone(tracker):
+    """Only copies with a twin go. Being unable to explain a row is not a
+    reason to delete it."""
+    from skald import store
+    T = 1_800_000_000
+    conn = app.db()
+    store.add_event(conn, WORLD, f"{stamp(T)}: Got connection SteamID 1\"",
+                    T, 1, "connect", ("1",))
+    assert app.tidy_echoed_events() == 0
+    assert conn.execute("SELECT count(*) FROM events").fetchone()[0] == 1
