@@ -1541,6 +1541,16 @@ BOSS_NAMES = {
 }
 
 
+# The legend's rows, in the order they read best: the things people put
+# somewhere on purpose first, the scenery after.
+PIN_LAYERS = (
+    ("boss", "bosses"), ("bed", "beds"), ("mine", "mining"),
+    ("house", "houses"), ("fire", "fires"), ("star", "marked"),
+    ("spot", "places"),
+)
+PIN_GLYPHS = {kind: glyph for kind, glyph in PIN_KINDS.values()}
+
+
 def pin_label(name):
     """A pin's name as a person would read it."""
     if name in BOSS_NAMES:
@@ -2623,8 +2633,7 @@ __MAPS__
 </body></html>"""
 
 
-def render_map(names, mapped, requested, shared=None, seeds=None, fog=True,
-               pins=True, portals=True, built=True):
+def render_map(names, mapped, requested, shared=None, seeds=None, fog=True):
     """The group's map.
 
     Two sources, and the first is far the better one. A world's own save
@@ -2705,7 +2714,7 @@ def render_map(names, mapped, requested, shared=None, seeds=None, fog=True,
     world_pins = (WORLD_MAPS.get(pick["label"], {}).get("pins", [])
                   if pick["table"] else [])
     marks = ""
-    if pins and world_pins:
+    if world_pins:
         span = fch.MAP_SPAN
         out = []
         for pin in world_pins:
@@ -2726,7 +2735,7 @@ def render_map(names, mapped, requested, shared=None, seeds=None, fog=True,
     # beside them rather than a tooltip. Two sharing a name are the two ends
     # of one.
     world_portals = (WORLD_PORTALS.get(pick["label"], []) if pick["table"] else [])
-    if portals and world_portals:
+    if world_portals:
         span = fch.MAP_SPAN
         ends = collections.Counter(p["name"] for p in world_portals if p["name"])
         # Handed over as data rather than as markers, because where one
@@ -2756,28 +2765,36 @@ def render_map(names, mapped, requested, shared=None, seeds=None, fog=True,
     # Three layers, three links, and each has to carry the other two's
     # setting -- a toggle that silently turns the others back on is worse
     # than no toggle.
-    def layer_link(flag, on, count, what):
-        state = {"fog": fog, "pins": pins, "portals": portals,
-                 "built": built}
-        state[flag] = not on
-        bits = "".join(f"&{k}=0" for k, v in state.items() if not v)
-        return (f'<a href="/map?world={pick["key"]}{bits}">'
-                f'{"hide" if on else "show"} '
-                + (f"{count} " if count else "")
-                + f'{what}</a>')
-
     world_built = (WORLD_BUILT.get(pick["label"], []) if pick["table"] else [])
-    links = []
-    if pick.get("fog", True) and terrain:
-        links.append(layer_link("fog", fog, 0, "fog of war"))
-    if world_pins:
-        links.append(layer_link("pins", pins, len(world_pins), "pins"))
+
+    # The legend. Everything is drawn and the boxes decide what is seen, so
+    # a change costs nothing and -- the point of it -- does not throw away
+    # where you had scrolled to. Only the fog is still a link: it changes
+    # what the server draws rather than what the page shows.
+    rows = []
     if world_portals:
-        links.append(layer_link("portals", portals, len(world_portals),
-                                "portals"))
+        rows.append(("portals", "\u25c8", "portals", len(world_portals)))
     if world_built:
-        links.append(layer_link("built", built, 0, "building"))
-    toggle = " &middot; ".join(links)
+        rows.append(("built", "\u2593", "building", 0))
+    by_kind = collections.Counter(
+        PIN_KINDS.get(pin["type"], ("spot", ""))[0] for pin in world_pins)
+    for kind, what in PIN_LAYERS:
+        if by_kind.get(kind):
+            rows.append((kind, PIN_GLYPHS.get(kind, "\u25cf"), what,
+                         by_kind[kind]))
+    legend = ""
+    if rows:
+        boxes = "".join(
+            f'<label><input type="checkbox" checked data-layer="{k}">'
+            f'<b class="key {k}">{glyph}</b>{what}'
+            + (f' <span>{n}</span>' if n else "")
+            + "</label>"
+            for k, glyph, what, n in rows)
+        legend = f'<div class="maplegend" id="legend">{boxes}</div>'
+
+    toggle = (f'<a href="/map?world={pick["key"]}&fog={"0" if fog else "1"}">'
+              f'{"hide" if fog else "show"} fog of war</a>'
+              if pick.get("fog", True) and terrain else "")
     note = (" &middot; terrain drawn from the world seed; the lit part is what "
             "the group has explored" if terrain else "")
     body = (f'<p class="facts"><b>{label}</b> &middot; {share:.2f}% of the map '
@@ -2786,13 +2803,14 @@ def render_map(names, mapped, requested, shared=None, seeds=None, fog=True,
             + terrain
             + (f'<img class="built" src="/built.png?world={pick["key"]}"'
                f' alt="" width="{edge}" height="{edge}">'
-               if built and world_built else "")
+               if world_built else "")
             + (f'<img class="fog" src="/map.png?world={pick["key"]}{over}"'
               f' alt="Explored map of {label}" width="{edge}" height="{edge}">'
                if show_fog else "")
             + marks
             + '</div></div>'
-            '<p class="facts"><button type="button" data-zoom="-1">&minus;</button> '
+            + legend
+            + '<p class="facts"><button type="button" data-zoom="-1">&minus;</button> '
             '<button type="button" data-zoom="1">+</button> '
             '<button type="button" data-zoom="0">reset</button>'
             ' &middot; drag to pan, wheel to zoom'
@@ -2837,6 +2855,32 @@ MAP_PAGE = """<!doctype html>
  .drawing b{font-size:1.1em;color:#f3e6c8}
  .drawing span{max-width:34em;font-size:.9em;line-height:1.5;opacity:.85}
  .drawing .soon{font-size:.8em;opacity:.55}
+ /* The legend. Checkboxes rather than links: a link reloads the page and
+    throws away where you had scrolled and zoomed to, which is most of what
+    you were looking at. */
+ .maplegend{display:flex;flex-wrap:wrap;gap:.35rem .9rem;margin:.6rem 0 0;
+   padding:.55rem .7rem;border:1px solid #3a3027;border-radius:8px;
+   background:#1b1712;font-size:.8rem}
+ .maplegend label{display:flex;align-items:center;gap:.35rem;cursor:pointer;
+   user-select:none;color:#d8cba8}
+ .maplegend input{accent-color:#c9a86a;margin:0}
+ .maplegend .key{font-size:13px;line-height:1;width:1.1em;text-align:center;
+   text-shadow:0 0 2px #000}
+ .maplegend span{opacity:.55;font-variant-numeric:tabular-nums}
+ .maplegend .key.boss{color:#ff9a76}
+ .maplegend .key.bed{color:#9fd0ff}
+ .maplegend .key.mine{color:#ffd27f}
+ .maplegend .key.house{color:#cbe8a0}
+ .maplegend .key.portals{color:#c9a3ff}
+ .maplegend .key.built{color:#f0b060}
+ /* What the boxes actually do. Hiding is a class on the plate, so a
+    change is one attribute and nothing is redrawn or refetched. */
+ .plate.off-portals #portals,
+ .plate.off-built .built,
+ .plate.off-boss .pin.boss, .plate.off-bed .pin.bed,
+ .plate.off-mine .pin.mine, .plate.off-house .pin.house,
+ .plate.off-fire .pin.fire, .plate.off-star .pin.star,
+ .plate.off-spot .pin.spot{display:none}
  .pins{position:absolute;inset:0}
  /* Each pin sits at its own place on the plate, so the zoom carries it.
     The glyph is pulled back to its own centre and kept at one size however
@@ -3063,6 +3107,18 @@ __BODY__
        zoomAbout(d > 0 ? 1.5 : 1 / 1.5, mid, mid);
      });
    });
+   // The legend. A box turns a class on the plate on or off and nothing
+   // else happens: no request, no redraw, and the map stays exactly where
+   // it was, which is the whole reason these are not links any more.
+   var legend = document.getElementById('legend');
+   if (legend) {
+     legend.addEventListener('change', function (e) {
+       var box = e.target;
+       if (!box.dataset || !box.dataset.layer) return;
+       plate.classList.toggle('off-' + box.dataset.layer, !box.checked);
+       hideTip();
+     });
+   }
    apply();
  })();
 </script>
@@ -3435,9 +3491,7 @@ class Handler(BaseHTTPRequestHandler):
                                               {w: world_metadata(w)
                                                for w in sorted(SERVERS)},
                                               params.get("fog", ["1"])[0] != "0",
-                                              params.get("pins", ["1"])[0] != "0",
-                                              params.get("portals", ["1"])[0] != "0",
-                                              params.get("built", ["1"])[0] != "0"),
+                                              ),
                               "text/html; charset=utf-8")
 
         now = time.time()
