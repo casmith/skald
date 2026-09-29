@@ -3,8 +3,13 @@
 ## 0.17.0
 
 - **Where the ore still is**, as four more map layers: silver, copper, tin
-  and obsidian. Still *is* — anything already mined is gone from the save,
-  so this is what is left rather than what was ever there.
+  and obsidian. Still *is* — a deposit mined out is gone from the save, and
+  so from the map. Watched across a day of backups, sixteen copper and tin
+  deposits disappeared and not one of them came back; what did appear was
+  new ground being explored, never ore returning.
+- A vein is mined in pieces, though, and one only half dug out is still
+  there — so a marker means something is left, not that it is untouched.
+  The map also only moves when the world saves, every half hour or so.
 - **Off unless an admin turns it on.** `SKALD_SHOW_ORES=1` enables it;
   without it the saves are never scanned, the page is never told there is
   any ore, and the legend does not mention it. Silver is buried and meant to
