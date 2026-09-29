@@ -2,621 +2,313 @@
 
 ## 0.20.0
 
-- **What time it is in the world**, on the map: the day, the clock and
-  whether it is dawn, day, dusk or night. The world's clock only runs while
-  somebody is online, so this is the world's own day rather than how long
-  ago it was made — which is the number that matters when you are deciding
-  whether to sail somewhere before dark.
-- **The map link on the dashboard goes to the world you were reading.** It
-  used to land on whichever world the map listed first, so looking at one
-  world's dashboard and clicking through took you to another.
-- A world nobody has played yet has no clock, and says nothing rather than
-  inventing one.
+- The map shows the world's day, time and whether it is dawn, day, dusk or
+  night. The clock only runs while someone is online, so it is the world's
+  own day, not elapsed real time.
+- The dashboard's map link opens the world you were reading. It used to open
+  whichever world the map listed first.
 
 ## 0.19.0
 
-- **Boats on the map**, by kind — raft, karve, longship, drakkar — because a
-  longship is wherever somebody last left it, which is rarely where you
-  moored it. Toggleable like everything else.
-- **The map page said "indoors" where it should have explained itself.** A
-  corpse marker was using the same name as the map's own description, so the
-  line under the title was replaced by a stray word — or by nothing at all,
-  on a world whose last corpse was outside.
-- The map page no longer offers to take a character file; that went in
-  0.16.0 and the link stayed behind.
-- **The demo now builds a world**, not just a month of history: a seed, a
-  cartography table with pins on it, portals, boats, a village and somebody
-  still lying in a crypt. `tools/demo.py` was the one way to see Skald
-  without a server, and the map — the part most worth seeing — was blank in
-  it. It is also what the screenshots are made from, so the README can show
-  the map without putting a real player's name in the repository.
+- Boats on the map, by kind: raft, karve, longship, drakkar.
+- Fixed: the map printed "indoors" instead of saying where the map came
+  from. A corpse marker had taken over the variable holding the description.
+- Removed the map's leftover link to the character upload, dropped in 0.16.0.
+- `tools/demo.py` builds a world as well as a month of history — a seed, a
+  cartography table, portals, boats, a village and a corpse — so the map
+  works without a server. The screenshots are made from it.
 
 ## 0.18.0
 
-- **Corpses on the map**, with whose they are. A tombstone lasts until
-  somebody loots it, so these are the ones still lying out there waiting to
-  be fetched.
-- **Including the ones in caves**, which are the ones you most want.
-  Valheim builds the inside of a cave or crypt in its own space five
-  thousand metres up, so a corpse in one looks at first like a bad read —
-  but the interior sits directly over its own entrance, so the x and z are
-  exactly the ground you walk to. Confirmed on two worlds by finding
-  objects at both heights over the same spot.
-- A corpse indoors is drawn differently and says so, because "in the cave
-  here" is a different errand from "on the hillside here".
+- Corpses on the map, with whose they are. A tombstone lasts until someone
+  loots it, so these are the ones still out there.
+- Corpses inside caves are included. Valheim builds cave interiors five
+  thousand metres above their own entrance, so the position is the ground
+  you walk to; they are marked as indoors.
 
 ## 0.17.0
 
-- **Where the ore still is**, as four more map layers: silver, copper, tin
-  and obsidian. Still *is* — a deposit mined out is gone from the save, and
-  so from the map. Watched across a day of backups, sixteen copper and tin
-  deposits disappeared and not one of them came back; what did appear was
-  new ground being explored, never ore returning.
-- A vein is mined in pieces, though, and one only half dug out is still
-  there — so a marker means something is left, not that it is untouched.
-  The map also only moves when the world saves, every half hour or so.
-- **Off unless an admin turns it on.** `SKALD_SHOW_ORES=1` enables it;
-  without it the saves are never scanned, the page is never told there is
-  any ore, and the legend does not mention it. Silver is buried and meant to
-  be hunted with a wishbone, and retiring that is a decision about somebody's
-  game rather than about software.
-- **Unticked even when it is on**, so turning the feature on does not turn
-  the answers on.
-- The read checks itself against the game's own rules: of 253 silver veins
-  across two worlds, **every one falls in Mountain**, and obsidian likewise.
-  Tin comes out at 29–31 m, which is the shoreline either side of sea level
-  at 30 — a confirmation of the terrain heights from an unrelated direction.
+- Where the ore still is: silver, copper, tin and obsidian.
+- Off unless `SKALD_SHOW_ORES=1`. Without it the saves are not scanned and
+  the legend does not mention it. Silver is meant to be hunted with a
+  wishbone; whether to retire that is the server owner's call. The layers
+  start unticked even when enabled.
+- A mined-out deposit disappears, because it disappears from the save. A
+  vein is mined in pieces, so a marker means something is left rather than
+  that it is untouched.
 
 ## 0.16.0
 
-- **The map is linked from the dashboard.** It was reachable only from your
-  own page, which is a strange place to keep the thing everyone shares. It
-  stays a page of its own rather than a panel on the dashboard, because the
-  dashboard reloads itself every minute and that would throw away wherever
-  you had panned and zoomed to.
-- **Uploading a character file is gone.** A world's cartography table gives a
-  better map than an upload ever did — everyone who used one, kept current by
-  the game, needing nothing from anybody — so the upload had nothing left to
-  add. The form, both endpoints and all the storage behind it are removed.
-- The table it wrote to stays in the schema. Steps are applied by position,
-  so removing one renumbers every step after it and existing databases would
-  start applying somebody else's migration. Nothing writes there now.
+- The dashboard links to the map. It stays a separate page: the dashboard
+  reloads every minute, which would throw away your pan and zoom.
+- Removed the character file upload. A world's cartography table gives a
+  better map and needs nothing from anybody. The form, both endpoints and
+  the storage behind it are gone; the unused table stays in the schema,
+  since schema steps are applied by position.
 
 ## 0.15.0
 
-- **Tap a portal and see where it goes.** A line is drawn to the other end,
-  and tapping a huddle draws one for every tag under it — so a hub shows
-  everywhere it reaches at once.
-- The pairing is the tag, because that is all there is. A portal's record in
-  the save holds a tag, who built it and sometimes its health, and **no
-  reference to the other end at all** — the game pairs them by tag when it
-  loads. On these worlds no tag is used more than twice, so the lines are
-  exact rather than a guess.
-- A portal whose partner is gone draws nothing, which is most of Warheimer:
-  21 of its 34 tags are used once.
-- Lines are drawn on the map itself, so they pan and zoom with it, and they
-  clear when the markers regroup — a line between markers that have moved
-  would point at nothing.
+- Tap a portal to draw a line to its other end. Tapping a group draws one
+  for every tag under it.
+- The pairing is the tag, because that is all the save holds: a portal
+  record has a tag, a creator and sometimes a health, and no reference to
+  the other end. The game pairs them by tag on load.
+- A portal whose partner is gone draws nothing.
 
 ## 0.14.1
 
-- **Dragging the map no longer selects half of it.** A pan swept a blue
-  highlight across every pin label and portal name it crossed, and the
-  browser would try to drag the terrain image away with it. Dragging a map
-  is dragging, not selecting.
+- Dragging the map no longer selects the labels it crosses.
 
 ## 0.14.0
 
-- **A legend under the map, with a checkbox for each thing on it** — portals,
-  building, and the pins split by what they are: bosses, beds, mining,
-  houses, fires, places. Each says how many there are.
-- **Turning one off is immediate and does not move the map.** These were
-  links, and a link reloads the page: it came back at the top left at 1x, so
-  hiding a layer threw away the part of the map you were looking at. Now a
-  box puts a class on the map and nothing else happens — no request, no
-  redraw, and the view cannot shift.
-- The pins used to be one switch for all 519 of them. Turning off 175 mining
-  marks to see the ten bosses underneath was not possible; now it is.
-- The fog of war stays a link, because it changes what the server draws
-  rather than what the page shows.
+- A legend under the map with a checkbox per layer: portals, building, and
+  pins split by kind, each with its count.
+- Toggling is immediate and does not move the map. These were links, and a
+  reload came back at the top left at 1x.
+- Pins used to be one switch for all of them; each kind is now its own.
+- Fog of war stays a link, since it changes what the server draws.
 
 ## 0.13.1
 
-- **Portals are back.** 0.13.0 drew none at all: building a marker for a
-  lone named portal handed a label the portal itself instead of its name,
-  which threw and stopped the drawing before a single marker existed.
-- Two variables a letter apart — one holding portals, one holding their
-  names — were the whole of it. There is now only the one.
-- **The script is now run in the tests, not just parsed.** The grouping had
-  its own tests and they passed while the map showed nothing, because the
-  fault was in the marker-building around it. The tests execute the page's
-  script against a stub of the few browser calls it makes and check markers
-  come out.
+- Fixed: 0.13.0 drew no portals at all. Building a marker for a lone named
+  portal passed the portal where its name was wanted, which threw and
+  stopped the drawing.
+- The tests now run the page's script against a stub browser and check
+  markers come out. The grouping had its own tests and they passed while the
+  map was blank.
 
 ## 0.13.0
 
-- **Portal markers now group by how far apart they *look*, and regroup as
-  you zoom.** Two portals twenty metres apart are four screen pixels apart
-  at 2.5x and a comfortable gap at 16x, so where one marker stops and the
-  next begins cannot be decided when the page is built — and deciding it in
-  metres was why a hub stayed an unreadable blob no matter how far in you
-  went.
-- **Tapping a huddle names everything under it.** Before, past 2.5x the
-  grouped markers were swapped for one marker per portal; they still sat on
-  top of each other, but each now knew only its own name, so tapping told
-  you about exactly one portal. That is the bug.
-- Zoom in and groups split where the gap is real; zoom out and they merge
-  again. A marker alone still shows its name beside it.
-- The grouping is now tested by running the page's own script, rather than a
-  copy of it kept in Python.
+- Portal markers group by how far apart they look, and regroup as you zoom.
+  Two portals twenty metres apart are four screen pixels apart at 2.5x and a
+  clear gap at 16x, so the grouping cannot be settled when the page is built.
+- Tapping a group names everything under it.
 
 ## 0.12.1
 
-- **The names in a huddle of portals actually appear now.** They were on a
-  `title`, which never showed: the map captures the pointer while it is
-  being dragged, so the marker never saw the event — and a phone has no
-  hover to show a title with in the first place. Tap or click a marker and
-  it lists them, on a desktop and on a phone alike.
-- Tapping empty map closes it, as does zooming, and a drag is not mistaken
-  for a tap.
-- **The map page's script is now checked for syntax.** This release nearly
-  shipped a string literal with a real newline inside it, which is a
-  JavaScript syntax error — and one bad token stops the whole script, so the
-  map would have lost its panning and zooming too. Nothing on the server
-  would have noticed: the page still returns 200.
+- Fixed: the names in a group of portals never appeared. They were on a
+  `title`, which cannot fire while the map holds the pointer, and which a
+  phone has no way to show at all. Tap or click instead.
+- The map's script is syntax-checked in the tests. This release nearly
+  shipped a broken string literal, which would have stopped the panning and
+  zooming too, and the page would still have returned 200.
 
 ## 0.12.0
 
-- **Portals that sit on top of each other are drawn as one.** A hub can hold
-  a dozen within twenty metres, and at the map's own scale a marker covers a
-  few hundred metres of ground — so they were one illegible blob and the
-  names could not be read at all. One marker now, with how many are in it,
-  and hovering it names them. On the world this was built against, 32
-  portals become 15 markers and the big hub collapses thirteen into one.
-- **Zoom in and they separate again**, each with its own name, as before.
-  Both sets are in the page and the stylesheet chooses between them, so
-  nothing is being regrouped while you drag the map about.
-- Each portal joins the nearest huddle rather than the first it touches — by
-  first match, a row of portals each within reach of the last chains into a
-  single group spanning kilometres.
+- Portals that sit on top of each other are drawn as one marker with a
+  count: 32 portals became 15 markers on the world this was built against.
+- Each portal joins the nearest group rather than the first within reach, so
+  a row of portals does not chain into one group spanning the map.
 
 ## 0.11.0
 
-- **Where you have built, drawn as firelight.** A new map layer showing
-  every piece anyone has placed: bright where a settlement is dense, faint
-  at an outpost, dark everywhere nobody has been. Toggled like the others.
-- **It shows building, not masonry.** Valheim's own ruins and dungeons are
-  made from the same prefabs people build with, and there are far more of
-  them — on one of these worlds fifty thousand generated pieces against a
-  few thousand built ones. A piece somebody placed records who placed it and
-  a generated one does not, so that is the test. Drawn without it, the map
-  is every ruin in the world and the places people live are lost in the
-  scatter.
-- **Nothing is exaggerated.** A settlement covers the ground it covers, and
-  on a ten-kilometre world that is a small bright place in a great deal of
-  dark. The map already zooms.
-- The layer sits over the ground and under the fog of war, because people
-  can only build where they have been.
+- Where you have built, drawn as firelight: bright where a settlement is
+  dense, faint at an outpost.
+- It shows building rather than masonry. Valheim's ruins use the same
+  prefabs people build with and there are far more of them — fifty thousand
+  generated pieces against a few thousand built ones on one world. A placed
+  piece records who placed it; a generated one does not.
 
 ## 0.10.1
 
-- **A world being drawn now says so.** Drawing takes a few minutes of one
-  core, and it used to happen inside the request that asked for it: the page
-  waited, showed an empty square, and a blank map for six minutes is
-  indistinguishable from a broken one — which is how it was reported.
-- The map page now returns at once and shows what is happening, with how far
-  along it is, and reloads itself until the picture arrives.
-- **Drawing has moved to one background worker that does one world at a
-  time.** These are threads of a single process, so the GIL gives them one
-  core between them however many the machine has: drawing three worlds at
-  once finished none of them sooner and meant none was ready until nearly
-  all were. In order, the first world is usable while the rest are coming.
-- A drawing that fails leaves nothing behind, rather than half a picture for
-  the next reader to serve as the finished one.
+- A world being drawn says so, with how far along it is, and the page
+  reloads until it arrives. Drawing used to happen inside the request, which
+  showed an empty square for six minutes.
+- Drawing moved to one background worker doing one world at a time. They are
+  threads of one process, so the GIL gives them a single core between them
+  however many the machine has.
 
 ## 0.10.0
 
-- **Portals on the map, with their names.** A portal is an ordinary world
-  object rather than map data, so it is nowhere near the cartography table —
-  but it is in the same saves Skald already reads, and the name someone
-  typed on it is the most useful label a map can carry. 32 on one of these
-  worlds, 47 on another.
-- **Two portals sharing a name are the two ends of one**, and that is how
-  the read checks itself: nothing in the parsing pairs them up, so names
-  landing in pairs is evidence rather than luck. On the world this was built
-  against, all 14 names are complete pairs. A portal whose partner is gone
-  is drawn dimmer.
-- Names appear once you zoom in, because a hub can hold six portals within a
-  few metres and their labels would otherwise pile on top of each other.
-- **Toggled like the other layers**, and all three now keep each other's
-  setting rather than quietly switching the others back on.
-- Found by the hash of the prefab name, with the position a fixed distance
-  before it. Nothing in the file says that distance, so every portal in a
-  chunk has to land somewhere a portal could be — one that does not means
-  the shape is wrong, and the whole file is refused rather than trusted in
-  part.
+- Portals on the map, with their names.
+- Two portals sharing a name are the two ends of one, which is how the read
+  checks itself: nothing in the parsing pairs them up, and on the world this
+  was built against all 14 names came out as pairs.
 
 ## 0.9.0
 
-- **The map's pins, from the cartography table.** The table shares pins the
-  way it shares the ground, so every marker anyone has put on it now shows
-  on the map — 519 of them on the world this was built against, 289 with
-  names people typed themselves. Nothing is uploaded and nobody has to do
-  anything: they arrive with the map Skald already reads.
-- Crossed-off pins are drawn faded, bosses and beds get their own colour,
-  and the pins the game places itself say `Eikthyr` and `The Elder` rather
-  than `$enemy_eikthyr`.
-- **Toggle them** beside the fog of war, and the two toggles keep each
-  other's setting rather than resetting it.
-- Markers hold their size as you zoom, because a marker that grows with the
-  map stops being a marker.
-- They are found the way the map is: by insisting the record shape accounts
-  for the region **exactly**. A block that does not consume its last byte is
-  not read as pins at all, so junk after a grid yields nothing rather than
-  inventing markers.
+- The pins from the cartography table: 519 on the world this was built
+  against, 289 named by hand. Nothing is uploaded.
+- Crossed-off pins are faded; the game's own pins say `Eikthyr` rather than
+  `$enemy_eikthyr`.
 
 ## 0.8.0
 
-- **Real terrain, generated from the world seed.** Valheim stores no
-  terrain — it regenerates it from one integer, which is why a
-  ten-kilometre world fits in a few megabytes — so the only way to draw a
-  map is to do the same arithmetic. Skald now does, with the explored mask
-  laid over it.
-- The map is no longer a silhouette. Explored ground shows in its own
-  colours, with the rest of the world faint behind it, so a coastline is a
-  coastline and a swamp is a swamp.
-- **Zoom and pan**, wheel or buttons, zooming about the pointer rather than
-  the corner.
-- **The ground is drawn, not the biome.** These are different questions and
-  the difference is most of the map. A base height decides which biome
+- Real terrain, generated from the world seed. Valheim stores no terrain; it
+  rebuilds the world from one integer, so drawing a map means doing the same
+  arithmetic.
+- Zoom and pan, zooming about the pointer.
+- The ground is drawn, not the biome. A base height decides which biome
   stands somewhere; each biome then shapes its own terrain, and the game
-  colours water by comparing *that* against sea level. About three quarters
-  of the world is not Ocean biome and only about two fifths of it is dry —
-  so colouring by biome alone turns an archipelago into a continent. Marsh
-  is the exception the game makes too: it generates at 27 metres, under the
-  water line by construction, and is drawn as the bog it is.
-- Three things had to be exactly right and are checked as such: Unity's
-  Perlin noise (Ken Perlin's 2002 noise with `abs()` inputs and a
-  `(raw + 0.69) / 1.483` rescale), Unity's random number generator, and the
-  order the world's offsets are drawn in — offsets 0..3, two seeds, then
-  offset 4 **last**. Any other order gives a different world that looks
-  perfectly reasonable.
-- Checked against the servers rather than against itself: of 2,221 landmarks
-  the games actually placed, 97.1% stand on dry land, the rest being coastal
-  — a landmark is recorded only by its 64-metre zone. Land area comes to
-  41–42% across the three worlds against a published 38–41%. And against a
-  real in-game map, 93.1% of the pixels a player has explored and sees as
-  land are land, holding at 93.0% on pixels not used to line the two up.
-  The seed hash was separately confirmed against three real world files.
-- Drawn once per seed, about a minute, then kept on disk beside the
-  database. The name records how it was drawn, so improving the drawing
-  replaces what is kept instead of being invisible.
-- Reads the newer `.fwl2` world metadata as well as `.fwl`.
+  colours water by comparing that against sea level. Three quarters of the
+  world is not Ocean biome but only two fifths of it is dry, so colouring by
+  biome alone turns an archipelago into a continent.
+- Checked against the servers rather than against itself: 97.1% of 2,221
+  placed landmarks stand on dry land, land area comes to 41–42% against a
+  published 38–41%, and 93.1% of the explored pixels on a real in-game map
+  read as land.
+- Drawn once per seed and kept on disk. The filename records how it was
+  drawn, so improving the drawing replaces what is kept.
+- Reads `.fwl2` world metadata as well as `.fwl`.
 
 ## 0.7.1
 
-- **A line is no longer counted twice because something quoted it.** The log
-  hook announces its work by quoting the whole line it is about to write, so
-  a full server log holds every hooked line twice -- and the copy differs
-  from the original by one trailing quote, just enough to slip past the key
-  that would have caught it. A timestamp inside quotes is now read as a line
-  being quoted rather than a line being logged.
-- Deaths were the casualty: they drive the per-player table, the
-  deaths-per-hour figure and a chart. On the deployment that found this, 316
-  of 2,834 events were copies and not one was a death -- that is luck, not
-  design. Arrivals, departures and landmarks were never affected.
-- Copies already stored are removed once on upgrade, and only those with a
-  genuine twin. An unexplained row is not a reason to delete anything.
+- Fixed: a line was counted twice when the log hook quoted it. The hook
+  announces its work by quoting the whole line, so a full log holds every
+  hooked line twice, and the copy differs by one trailing quote — enough to
+  slip past the primary key.
+- Deaths were the casualty; they drive the per-player table and a chart. On
+  the deployment that found this, 316 of 2,834 events were copies and none
+  was a death. Copies with a genuine twin are removed on upgrade.
 
 ## 0.7.0
 
-- **The group's map, with nobody uploading anything.** A world's own save
-  holds its cartography table: everything anyone who used one has shared to
-  it. Skald already mounts those saves to read the world clock, so `/map`
-  now shows a real group map for every world it watches, kept current by the
-  game itself.
-- It is a far better source than an uploaded character. On the world this
-  was built against, the table holds **154,355** explored pixels; the
-  fullest single character file we had held 3,920. Nothing is uploaded,
-  nothing leaves the server, and it covers everyone who used a table rather
-  than everyone who could be bothered.
-- Found by shape, like a character's map — a run of `edge × edge` bytes
-  every one of which is 0 or 1 is not anything else. A world save is a heap
-  of chunks with no index to the thing we want.
-- Read once per save: a file whose size and modification time have not moved
-  is not decompressed again, because a world saves every half hour and this
-  is four megabytes.
-- Uploaded characters still work, for worlds with no table.
-- **Maps are compressed now, and Skald could not read them.** Valheim moved
-  the map into a gzip stream and started keeping a second grid beside the
-  first — what you uncovered, and what others uncovered for you. A character
-  created since writes every map that way, so one that plays only on a
-  server looked, to a reader that knew only the older shape, like someone
-  who had never been anywhere. Both shapes now read.
-- The two grids are **added together**, because a square someone else
-  revealed for you is a square you can see, and this is a map of where a
-  group has been.
-- **Pins are optional rather than fatal.** Their shape gained a field that
-  is not pinned down; a map with no pins is worth having, and a parser that
-  refuses the map because it could not read a label is not.
+- The group's map, with nothing to upload. A world's save holds its
+  cartography table, and Skald already reads those saves. The table held
+  154,355 explored pixels on one world against 3,920 in the fullest
+  character file.
+- Found by shape: a run of `edge × edge` bytes that are all 0 or 1 is not
+  anything else. Read once per save.
+- Compressed maps now read. Valheim moved the map into a gzip stream and
+  added a second grid beside the first, so a character made since looked
+  empty to a reader that knew only the older shape. The two grids are added
+  together.
+- Pins are optional rather than fatal: a map with no pins is worth having.
 
 ## 0.6.1
 
-- **A newly understood line now reaches the log that already held it.**
-  Adding a pattern only ever matched lines that arrived *after* the upgrade:
-  each file's read offset already said "done", so nothing went back for the
-  rest. Raid history shipped in 0.6.0 and found nothing, because every raid
-  line in the logs had been read and discarded months before Skald knew what
-  one was.
-- Skald now records a digest of the patterns it understands. When that
-  changes, every event file is read again from the start — which costs a
-  little time and adds nothing twice, since ingestion is keyed by the line's
-  own text. Keyed on the patterns rather than the version, so a release that
-  changes no pattern re-reads nothing.
-- This is what made keeping the whole server log worth anything. Without it
-  the promise — that a new pattern is a Skald upgrade and nothing else — was
-  not true.
-- **The map upload could not read a real character file.** It was written
-  from a published description of version 33; files written today say
-  version 46, and the layout moved. Every real upload was refused. Fixed,
-  and checked against actual files for the first time.
-- The parser no longer walks the file to the map — it **finds** it. The
-  explored bitmap is unmistakable (edge × edge bytes, every one 0 or 1, four
-  megabytes of it for a 2048-square map), and everything needed is read from
-  around it. The fields in front of it have already been rearranged once;
-  the bitmap is the one part whose shape is fixed by what it is. Version 33
-  files still read, which is the point.
-- Two corrections that came from real data: the map is a **length-prefixed
-  byte array**, not inline fields; and an **optional point that is not set
-  still occupies its twelve bytes**, zeroed. Assuming otherwise put the
-  world id in the wrong place and read two of three worlds as id 0 — and
-  since the id is the key a map is stored under, they would have overwritten
-  each other.
-- Character files are commonly **not** under `AppData`: with cloud saves
-  they live in Steam's `userdata/<id>/892970/remote/characters`. Both paths
-  are now given on the upload form and in the docs.
+- Fixed: a newly understood line never reached the log that already held it.
+  Adding a pattern only matched lines arriving after the upgrade, because
+  each file's read offset already said "done". Raid history shipped in 0.6.0
+  and found nothing.
+- Skald records a digest of the patterns it understands and re-reads every
+  file when it changes. Keyed on the patterns rather than the version, so a
+  release changing no pattern re-reads nothing.
+- Fixed: the map upload could not read a real character file. It was written
+  from a description of version 33; files written today say 46 and the
+  layout moved.
+- The parser finds the map rather than walking to it, and reads what it
+  needs from around it.
+- Character files are commonly not under `AppData`: with cloud saves they
+  live in `userdata/<id>/892970/remote/characters`.
 
 ## 0.6.0
 
-- **Raid history.** The server logs every raid as it starts, with an exact
-  time — `Random event set:army_bonemass` — so the dashboard now lists what
-  came for you, when, and who was online for it. No game-server change was
-  needed: Skald already reads the whole log.
-- The docs said raids were not in the log at all. That was true of the
-  *filtered* log the hook used to write; capturing everything is what
-  exposed them.
-- The raid list comes from the game's own asset bundles, not memory: the ten
-  the core event list references, plus the Mistlands, Ashlands, Deep North
-  and mountain-cave raids from their biomes' location lists. Each one also
-  has an `event_<name>_start`/`_end` localisation pair, which is how we know
-  the list is the game's. An unknown id still reads as something.
-- `Random event set:` with nothing after it is the event *ending*, and is
-  not recorded as a raid starting.
-- New `/api/raids`.
-- **Four milestone keys named**, taken from the game's own asset bundles:
-  `defeated_frozenking`, `defeated_frozenking_p3`, `defeated_hive` and
-  `killed_frysling`. All Deep North, which is unfinished — so nobody can set
-  them yet, and that is exactly why they are worth naming before anyone can.
-  The list came from every Character prefab's `m_defeatSetGlobalKey`, which
-  is where these live: they are not in the code, which is why
-  `defeated_writhan` was in our worlds and nowhere in the assembly.
-- They are deliberately **not** kind `boss`, however much FrozenKing looks
-  like one. The badge row is driven by `BOSSES`, and a `boss` missing from
-  that list is filtered out of the table *and* absent from the badges — it
-  would disappear entirely. A test now enforces that invariant.
-- **`bosshildir1`–`3` marked unverified.** Unlike every other key, they
-  appear in neither the assembly nor any prefab, and no world of ours has
-  one. Kept, since a key that never arrives shows nothing, but no longer
-  presented as evidence.
-- Generated labels no longer contain a double space (`killed_seekerbrood`
-  read as "First  seekerbrood killed"), and a key that is nothing but a
-  prefix no longer renders with a leading one.
-
-
-- **Milestones are newest first**, on the page and in `/api/milestones`.
-  They were the only list in Skald running the other way — `/api/sessions`
-  and `/api/deaths` have always been newest first — so the kill you just
-  made was at the bottom of the table.
-- Keys found in the same scan share a timestamp, so the tie is broken
-  deterministically and the table no longer reshuffles between refreshes.
-- **Tell me about it.** Sign in, paste a Discord webhook, and Skald posts
-  when someone comes online or a boss falls. No bot, no gateway, no
-  dependency — one POST of one JSON field, from the poller that was already
-  watching.
-- **Only Discord webhook URLs are accepted.** Letting a signed-in visitor
-  choose where the server sends a request is a forgery hole by
-  construction: without the restriction, anyone with a Steam account could
-  point Skald at a machine behind its firewall and use it as a prod.
-- Nothing announces a backlog. The first tick after a restart only records
-  what is true; a subscription made today does not replay the week.
-- You are never told that you have arrived — a subscriber's own claimed
-  characters are skipped.
-- A webhook deleted in Discord answers 404 for ever, so failures are
-  counted and the subscription switches itself off after ten rather than
-  posting into the void every minute. The error shows on `/me`.
-- **The map.** Upload a character file on `/me` and Skald keeps your fog of
-  war and your pins; `/map` shows everyone's, added together, with the share
-  of the world the group has seen between them.
-- **It keeps nothing else because it decodes nothing else.** The per-world
-  map is the second chunk of a `.fch`, right after five integers — so the
-  parser reads the header and the worlds and *stops*. Inventory, skills,
-  appearance, journal and name all sit after the part it reads and are never
-  looked at. That is the privacy promise made structural rather than
-  promised.
-- Stored at a bit a pixel and deflated: a 2048-square map is a few kilobytes
-  once compressed, not four megabytes.
-- The PNG is written by hand — a 1-bit paletted image, which is exactly what
-  the data already is. No image library, and Skald still has no
-  dependencies.
-- Hostile files are bounded rather than trusted: a map edge, a pin count and
-  an upload size are all capped, and anything unreadable comes back as a
-  sentence rather than a stack trace.
-- New `/map` and `/map.png?world=<uid>`.
+- Raid history: what came for you, when, and who was online. The server logs
+  every raid as it starts, so no game-server change was needed.
+- The raid list comes from the game's own asset bundles, not memory.
+- Four milestone keys named from those bundles: `defeated_frozenking`,
+  `defeated_frozenking_p3`, `defeated_hive`, `killed_frysling`. All Deep
+  North, which is unfinished, so nobody can set them yet.
+- `bosshildir1`–`3` marked unverified: they appear in neither the assembly
+  nor any prefab.
+- Milestones are newest first, on the page and in `/api/milestones`.
+- Discord webhooks: sign in, paste one, and Skald posts when someone comes
+  online or a boss falls. Only Discord webhook URLs are accepted — letting a
+  signed-in visitor choose where the server sends a request is a forgery
+  hole. A new subscription does not replay the week, and one that has failed
+  ten times switches itself off.
+- The map: upload a character file and Skald keeps your fog of war and your
+  pins. It decodes nothing else — inventory, skills, appearance and journal
+  all sit after the part it reads.
+- New `/api/raids`, `/map`, `/map.png`.
 
 ## 0.5.1
 
-- **A server log kept in the events directory was read twice.** That is the
-  sensible place for it — the volume is already shared with the game and
-  already survives a container being recreated — but the file matches the
-  glob that finds the hook's files, so it was read as a whole server log
-  *and* as a hook file. The data was unharmed (ingestion is keyed by the
-  line's own text), but every line of ordinary server chatter counted as one
-  Skald had failed to recognise, and that number is the entire "an update
-  reworded something" signal on `/diagnostics`. A file named as a world's
-  `log_file` is no longer picked up as a hook file, and a count left behind
-  by an older version is cleared.
-- **"Default settings" and "Modified" never appeared on the page.** The
-  dashboard was reading the summary built for the online list, which does
-  not carry whether the server calls the world modified. Worlds with
-  modifiers in the log were unaffected; worlds relying on the Steam tag
-  showed nothing at all.
+- Fixed: a server log kept in the events directory was read twice, once as a
+  whole log and once as a hook file. The data was unharmed, but every line
+  of ordinary chatter counted as one Skald had failed to recognise — which
+  is the entire "an update reworded something" signal on `/diagnostics`.
+- Fixed: "Default settings" and "Modified" never appeared on the page.
 
 ## 0.5.0
 
-- **How the world is set up**, under the tabs: combat, death penalty,
-  resources, raids and portals, or the name of the preset the server was
-  started with. Verified against a real server rather than guessed.
-- Two sources, because neither is enough alone. The server logs its
-  modifiers **in words**, once, at startup — that is where the names come
-  from. It also advertises them in its Steam tags as `m=`, which Skald reads
-  only as a **yes or no**: the ids in it are undocumented, built at runtime
-  and free to be renumbered by any update, and a confidently wrong
-  "Very Hard" is worse than no answer. Between them, the tag says *whether*
-  a world is modified even when its startup went unwatched, and the log says
-  *which* — and the page says so plainly when it knows the first and not the
-  second.
-- A preset is logged as itself and is **not** expanded into the individual
-  settings, so a world reports whichever its operator used.
-- Modifiers are logged once per run, so the newest start wins and an older
-  one is history. A modifier Skald has never heard of still shows, with a
-  tidied-up label.
-- New `/api/world`: per world, its modifiers, preset, game version and
-  whether the server calls it modified.
+- How the world is set up: combat, death penalty, resources, raids and
+  portals, or the preset the server was started with.
+- Two sources. The server logs its modifiers in words at startup, which is
+  where the names come from; its Steam tags say only whether a world is
+  modified, since the ids in them are undocumented and free to be
+  renumbered. The page says so plainly when it knows one and not the other.
+- New `/api/world`.
 
 ## 0.4.1
 
-- **Wind direction was backwards.** Skald showed the direction the wind came
-  *from* — the meteorological convention, right for a forecast and exactly
-  opposite to what a player standing in it sees. Valheim's own bearing, the
-  one a ship's wind indicator points along, is the direction it blows
-  *toward*. The arrow and the compass letter now match the game. Reported
-  from a live server, where the page said NE and the wind was blowing SW.
-- The weather engine was never wrong: the angle always matched the reference
-  implementation's vectors. Only the page turned it around. The regression
-  test now pins the displayed bearing to that angle, so the two cannot part
-  again.
-- **API change:** `wind_from` is now `wind_dir` in `/api/weather`, because
-  the old name described the old, wrong reading.
+- Fixed: wind direction was backwards. Skald showed the direction the wind
+  came from; Valheim's bearing is the direction it blows toward. The weather
+  engine was right and only the page turned it around.
+- **API change:** `wind_from` is now `wind_dir` in `/api/weather`.
 
 ## 0.4.0
 
-- **Your own page.** `/me` grew from a list of characters into your numbers:
-  hours over 24 hours, 7 days, 30 days and all time, deaths and deaths per
-  10 hours played, your longest session, when you were first seen, where you
-  stand among everyone on the server, your hours and deaths per day, and
-  your last few sessions.
-- It is the dashboard's own `playtime`, `daily` and `recent` narrowed to
-  your characters, not a second set of arithmetic — so there is one
-  definition of an hour played and your page cannot drift from the table you
-  appear in.
-- Your other characters get a line rather than being folded into the
-  headline, since the numbers people mean are their primary's.
-- Still nothing new on the public page, and still no Steam IDs anywhere.
+- Your own page: hours over 24 hours, 7 days, 30 days and all time, deaths
+  and deaths per 10 hours, longest session, where you stand among everyone,
+  and your last few sessions.
+- It narrows the dashboard's own arithmetic rather than repeating it, so
+  your page cannot drift from the table you appear in.
 
 ## 0.3.0
 
-- **Your characters, worked out rather than claimed.** A Valheim log names
-  characters, not accounts — but a connection logs a SteamID and the
-  character that follows it is whoever that connection turned out to be, so
-  Skald knows the pairing already. `/me` lists the characters your Steam
-  account has been seen playing, and **your most-played one is your primary
-  automatically**. Pick a different one and it stays put; mark one as not
-  yours and it stops being offered.
-- There is nothing to type in, deliberately: on a public instance a
-  free-form claim would let anyone take any name. Taking a character here
-  means having the Steam account that played it.
-- Your characters are **private** — never on the dashboard, never in the
-  API, and no Steam ID ever is. The only public effect of signing in is that
-  the page greets you by your character's name instead of your Steam
-  persona.
-- `tools/demo.py` now gives a player a second character and renders the page,
-  so the screenshot is made the same way every other one is.
+- Your characters, worked out rather than claimed. A Valheim log names
+  characters, not accounts, but a connection logs a SteamID and the
+  character that follows it. Your most-played character becomes your primary
+  automatically.
+- There is nothing to type in: on a public instance a free-form claim would
+  let anyone take any name.
+- Your characters are private — never on the dashboard, never in the API,
+  and no Steam ID ever is.
 
 ## 0.2.0
 
-- **Skald no longer needs the lloesche image.** A world can name its own
-  `log_file`, and Skald reads the server's whole log — skipping the noise,
-  reading incrementally, and unwrapping a container's json log format if it
-  finds one. Vanilla and systemd servers work now.
-- A bind mount whose source has gone leaves an empty *directory* behind,
-  which Skald counted as an existing but empty log. It now checks for a
-  file, and says so on `/diagnostics`.
-- Ingesting outside the page's own path left the replay cache stale.
-  Ingestion invalidates it itself, so call order cannot matter.
-- **Optional sign in through Steam**, off until `base_url` is set. It is
-  OpenID 2.0 — Steam offers no OAuth2 to third-party sites — so there is
-  nothing to register and no client secret, and what comes back is a
-  SteamID64 and nothing else. A display name and avatar need a free Steam
-  Web API key, which is optional. Sessions are a random token in an
-  HttpOnly, SameSite=Lax cookie (Secure over https); the database keeps only
-  its hash. It gates nothing yet: the dashboard stays exactly as public as
-  wherever you host it.
+- Skald no longer needs the lloesche image. A world can name its own
+  `log_file`, and Skald reads the server's whole log, unwrapping a
+  container's json format if it finds one. Vanilla and systemd servers work.
+- Optional sign in through Steam, off until `base_url` is set. It is OpenID
+  2.0, so there is nothing to register and no client secret; what comes back
+  is a SteamID64 and nothing else. Sessions are a random token in an
+  HttpOnly, SameSite=Lax cookie, and the database keeps only its hash.
+- Fixed: a bind mount whose source has gone leaves an empty directory, which
+  Skald counted as an existing but empty log.
 
 ## 0.1.1
 
-- **Boss kills are dated to the save interval, and the docs now say so
-  plainly.** Valheim does not log a kill: the game's `Setting global key`
-  message is compiled out of release builds, and the server has no verbosity
-  flag to bring it back. Verified by killing Eikthyr on a test server and
-  finding no such line. Skald still reads it if it ever appears.
-- `/diagnostics` shows **how often each world actually saves**, measured
-  from the last two saves, because that is the precision every boss kill is
-  dated to. Tighten it with `SERVER_ARGS: "-saveinterval 300"`, which is now
-  documented and tested (5-minute saves confirmed on a live server).
+- Boss kills are dated to the save interval, and the docs say so. Valheim
+  does not log a kill: the `Setting global key` message is compiled out of
+  release builds. Verified by killing Eikthyr on a test server.
+- `/diagnostics` shows how often each world actually saves, since that is
+  the precision every boss kill is dated to.
 
 ## 0.1.0 — first release worth sharing
 
 The first version documented well enough for someone else to run, and tested
 by doing exactly that on a clean machine.
 
-- **The quick start works from nothing**, which it did not before: a fresh
-  Docker volume is root-owned and Skald runs unprivileged, so it could not
-  create its database and every page failed — while the container reported
-  healthy, because `/healthz` only proved a socket was open. The image now
-  ships its directories with the right ownership, `/healthz` answers only
-  when the database is reachable, and Skald exits with the remedy rather
-  than serving failures behind a green tick.
-- **Docs**: [installing](docs/install.md), [configuration](docs/configuration.md),
-  [how it works](docs/how-it-works.md), and an honest
-  [limitations](docs/limitations.md) page.
-- `compose.example.yaml` requires a server password instead of quietly
-  handing the game servers a blank one.
+- The quick start works from nothing. A fresh Docker volume is root-owned
+  and Skald runs unprivileged, so it could not create its database and every
+  page failed — while the container reported healthy, because `/healthz`
+  only proved a socket was open.
+- Docs: [installing](docs/install.md), [configuration](docs/configuration.md),
+  [how it works](docs/how-it-works.md), [limitations](docs/limitations.md).
 - `tools/demo.py` builds a month of invented history, for trying Skald
-  without a game server — and for screenshots, so no real player's name is
-  ever needed in this repository.
+  without a game server and for screenshots.
 
 ## 0.0.2
 
-- **Configuration** from a TOML file, with environment variables over it.
-  Worlds can say where their saves and backups live. The older `TRACKER_*`
-  names still work.
-- **`/diagnostics`**: every path and world, what is arriving and what is
-  not, and where each setting came from.
-- **SQLite** under `data_dir`, with migrations. Every event line is ingested
-  once and kept, read incrementally instead of re-reading whole files, so
-  history outlives the log files. A `milestones.json` from 0.0.1 is imported
-  on first run.
-- **Runs as uid 10001** instead of root.
-- **Notices when Valheim moves**: the game version each server reports, the
-  save format's version, and a count of log lines matching nothing — all on
-  `/diagnostics`, so a reworded line shows up instead of going quiet.
+- Configuration from a TOML file, with environment variables over it. The
+  older `TRACKER_*` names still work.
+- `/diagnostics`: every path and world, what is arriving and what is not,
+  and where each setting came from.
+- SQLite under `data_dir`, with migrations. Every line is ingested once and
+  kept, so history outlives the log files.
+- Runs as uid 10001 instead of root.
+- Notices when Valheim moves: game version, save format version, and a count
+  of log lines matching nothing.
 
 ## 0.0.1
 
-Extracted from the homelab deploy repository it grew up in, with the tests
-it never had. Writing them found three bugs:
+Extracted from the homelab deploy repository it grew up in, with the tests it
+never had. Writing them found three bugs:
 
-- a session whose `Closing socket` line never arrived was merged with the
-  player's next one, counting the hours between as play;
+- a session whose `Closing socket` never arrived was merged with the next
+  one, counting the hours between as play;
 - the forecast's footnote named biomes past the progress gate;
 - a world whose bosses fell before Skald was watching showed no badges.
