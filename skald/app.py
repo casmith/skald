@@ -1372,6 +1372,10 @@ _PORTAL_FILES = {}
 # world -> everywhere somebody has built, and the files it came from
 WORLD_BUILT = {}
 _BUILT_FILES = {}
+# world -> {ore: [(x, z)]}. Only ever filled when an admin has
+# turned it on; when they have not, nothing is even read.
+WORLD_ORES = {}
+_ORE_FILES = {}
 _CARTO_FILES = {}
 
 
@@ -1506,6 +1510,25 @@ def built_png(world):
     return body
 
 
+# (world, ore) -> (how many deposits it was drawn from, the PNG).
+_ORE_PNG = {}
+
+
+def ore_png(world, ore):
+    """One ore's deposits in one world, as a transparent overlay."""
+    if not CONFIG.show_ores:
+        return None
+    points = (WORLD_ORES.get(world) or {}).get(ore) or []
+    if not points:
+        return None
+    held = _ORE_PNG.get((world, ore))
+    if held and held[0] == len(points):
+        return held[1]
+    body = fch.ore_png(points, TERRAIN_SIZE, ORE_COLOURS[ore])
+    _ORE_PNG[(world, ore)] = (len(points), body)
+    return body
+
+
 def terrain_worker():
     """Draw whatever is missing, one world at a time.
 
@@ -1549,6 +1572,17 @@ PIN_LAYERS = (
 )
 PIN_GLYPHS = {kind: glyph for kind, glyph in PIN_KINDS.values()}
 
+# The ore layers, in the order a pick meets them. Off unless an admin has
+# set SKALD_SHOW_ORES, and unticked even then: a vein nobody asked to see is
+# a wishbone made pointless.
+ORE_LAYERS = (
+    ("silver", "silver", (18, 132, 160)),
+    ("copper", "copper", (214, 132, 78)),
+    ("tin", "tin", (90, 96, 120)),
+    ("obsidian", "obsidian", (150, 110, 200)),
+)
+ORE_COLOURS = {name: colour for name, _, colour in ORE_LAYERS}
+
 
 def pin_label(name):
     """A pin's name as a person would read it."""
@@ -1584,6 +1618,12 @@ def refresh_world_maps():
                 directory, _BUILT_FILES.setdefault(world, {}))
         except Exception as e:                     # a save mid-write, say
             print(f"construction for {world}: {e}", flush=True)
+        if CONFIG.show_ores:
+            try:
+                WORLD_ORES[world] = fch.world_ores(
+                    directory, _ORE_FILES.setdefault(world, {}))
+            except Exception as e:                 # a save mid-write, say
+                print(f"ores for {world}: {e}", flush=True)
 
 
 def worlds_of(h):
@@ -2717,6 +2757,11 @@ def render_map(requested, shared=None, seeds=None, fog=True):
     # setting -- a toggle that silently turns the others back on is worse
     # than no toggle.
     world_built = WORLD_BUILT.get(pick["label"], [])
+    # Only when an admin has turned it on, and then only the ores this world
+    # still holds. With it off, nothing is read, nothing is drawn, and the
+    # legend does not mention it.
+    ores = WORLD_ORES.get(pick["label"], {}) if CONFIG.show_ores else {}
+    world_ores = [ore for ore, _, _ in ORE_LAYERS if ores.get(ore)]
 
     # The legend. Everything is drawn and the boxes decide what is seen, so
     # a change costs nothing and -- the point of it -- does not throw away
@@ -2724,23 +2769,29 @@ def render_map(requested, shared=None, seeds=None, fog=True):
     # what the server draws rather than what the page shows.
     rows = []
     if world_portals:
-        rows.append(("portals", "\u25c8", "portals", len(world_portals)))
+        rows.append(("portals", "\u25c8", "portals", len(world_portals), True))
     if world_built:
-        rows.append(("built", "\u2593", "building", 0))
+        rows.append(("built", "\u2593", "building", 0, True))
     by_kind = collections.Counter(
         PIN_KINDS.get(pin["type"], ("spot", ""))[0] for pin in world_pins)
     for kind, what in PIN_LAYERS:
         if by_kind.get(kind):
             rows.append((kind, PIN_GLYPHS.get(kind, "\u25cf"), what,
-                         by_kind[kind]))
+                         by_kind[kind], True))
+    for ore in world_ores:
+        rows.append((ore, "\u25c6", ore, len(ores[ore]), False))
+    # A layer that starts unticked has to start hidden too, or the first
+    # thing you see is the opposite of what the box says.
+    off_at_first = "".join(f" off-{k}" for k, _, _, _, on in rows if not on)
     legend = ""
     if rows:
         boxes = "".join(
-            f'<label><input type="checkbox" checked data-layer="{k}">'
+            f'<label><input type="checkbox"{" checked" if on else ""}'
+            f' data-layer="{k}">'
             f'<b class="key {k}">{glyph}</b>{what}'
             + (f' <span>{n}</span>' if n else "")
             + "</label>"
-            for k, glyph, what, n in rows)
+            for k, glyph, what, n, on in rows)
         legend = f'<div class="maplegend" id="legend">{boxes}</div>'
 
     toggle = (f'<a href="/map?world={pick["key"]}&fog={"0" if fog else "1"}">'
@@ -2750,11 +2801,15 @@ def render_map(requested, shared=None, seeds=None, fog=True):
             "the group has explored" if terrain else "")
     body = (f'<p class="facts"><b>{label}</b> &middot; {share:.2f}% of the map '
             f'seen &middot; {where}{seed_line}</p>'
-            '<div class="viewer" id="viewer"><div class="plate" id="plate">'
+            f'<div class="viewer" id="viewer"><div class="plate{off_at_first}" id="plate">'
             + terrain
             + (f'<img class="built" src="/built.png?world={pick["key"]}"'
                f' alt="" width="{edge}" height="{edge}">'
                if world_built else "")
+            + "".join(
+                f'<img class="ore {ore}" src="/ore.png?world={pick["key"]}'
+                f'&ore={ore}" alt="" width="{edge}" height="{edge}">'
+                for ore in world_ores)
             + (f'<img class="fog" src="/map.png?world={pick["key"]}{over}"'
               f' alt="Explored map of {label}" width="{edge}" height="{edge}">'
                if show_fog else "")
@@ -2829,10 +2884,19 @@ MAP_PAGE = """<!doctype html>
  .maplegend .key.house{color:#cbe8a0}
  .maplegend .key.portals{color:#c9a3ff}
  .maplegend .key.built{color:#f0b060}
+ .maplegend .key.silver{color:#2aa8c8}
+ .maplegend .key.copper{color:#d6844e}
+ .maplegend .key.tin{color:#9298b4}
+ .maplegend .key.obsidian{color:#966ec8}
+ /* The ore sits above the ground and below the fog, like the building:
+    you can only have seen a vein somewhere you have been. */
+ .ore{image-rendering:pixelated}
  /* What the boxes actually do. Hiding is a class on the plate, so a
     change is one attribute and nothing is redrawn or refetched. */
  .plate.off-portals #portals,
  .plate.off-built .built,
+ .plate.off-silver .ore.silver, .plate.off-copper .ore.copper,
+ .plate.off-tin .ore.tin, .plate.off-obsidian .ore.obsidian,
  .plate.off-boss .pin.boss, .plate.off-bed .pin.bed,
  .plate.off-mine .pin.mine, .plate.off-house .pin.house,
  .plate.off-fire .pin.fire, .plate.off-star .pin.star,
@@ -3421,6 +3485,20 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", "image/png")
             self.send_header("Content-Length", str(len(body)))
             # People build, so unlike the terrain this does change.
+            self.send_header("Cache-Control", "public, max-age=300")
+            self.end_headers()
+            return self.wfile.write(body)
+        if path == "/ore.png":
+            want = params.get("world", [""])[0]
+            ore = params.get("ore", [""])[0]
+            body = (ore_png(want, ore)
+                    if want in SERVERS and ore in ORE_COLOURS else None)
+            if not body:
+                return self._send(404, "no ore for that world", "text/plain")
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Length", str(len(body)))
+            # People mine, so this changes.
             self.send_header("Cache-Control", "public, max-age=300")
             self.end_headers()
             return self.wfile.write(body)

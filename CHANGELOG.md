@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.17.0
+
+- **Where the ore still is**, as four more map layers: silver, copper, tin
+  and obsidian. Still *is* — anything already mined is gone from the save,
+  so this is what is left rather than what was ever there.
+- **Off unless an admin turns it on.** `SKALD_SHOW_ORES=1` enables it;
+  without it the saves are never scanned, the page is never told there is
+  any ore, and the legend does not mention it. Silver is buried and meant to
+  be hunted with a wishbone, and retiring that is a decision about somebody's
+  game rather than about software.
+- **Unticked even when it is on**, so turning the feature on does not turn
+  the answers on.
+- The read checks itself against the game's own rules: of 253 silver veins
+  across two worlds, **every one falls in Mountain**, and obsidian likewise.
+  Tin comes out at 29–31 m, which is the shoreline either side of sea level
+  at 30 — a confirmation of the terrain heights from an unrelated direction.
+
 ## 0.16.0
 
 - **The map is linked from the dashboard.** It was reachable only from your
