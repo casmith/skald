@@ -821,6 +821,111 @@ def construction_png(points, edge, span=None):
             + chunk(b"IEND", b""))
 
 
+# What is still in the ground, and what it is called in the save. Only the
+# four worth hunting; everything else a pick touches is scenery.
+ORES = {
+    "silver": "silvervein",
+    "copper": "rock4_copper",
+    "tin": "MineRock_Tin",
+    "obsidian": "MineRock_Obsidian",
+}
+
+
+def _ores_in(path, pats):
+    """The deposits in one chunk: {ore: [(x, z)]}."""
+    try:
+        with open(path, "rb") as f:
+            blob = f.read()
+    except OSError:
+        return {}
+    out = {}
+    for needle, ore in pats.items():
+        at, here = blob.find(needle), []
+        while at != -1:
+            if at >= PORTAL_POS_BACK:
+                x, y, z = struct.unpack_from("<3f", blob, at - PORTAL_POS_BACK)
+                # Dropped one at a time rather than condemning the file: four
+                # patterns over tens of megabytes will collide by chance
+                # eventually, and one bad point is not worth a world's ore.
+                if (-MAP_SPAN < x < MAP_SPAN and -MAP_SPAN < z < MAP_SPAN
+                        and -1000.0 < y < 2000.0):
+                    here.append((x, z))
+            at = blob.find(needle, at + 4)
+        if here:
+            out.setdefault(ore, []).extend(here)
+    return out
+
+
+def world_ores(directory, cache=None):
+    """Every deposit still standing in a world: {ore: [(x, z)]}.
+
+    Still standing is the useful part -- anything already mined is gone from
+    the save, so this is what is left rather than what was ever there.
+    """
+    pats = {struct.pack("<i", stable_hash(prefab)): ore
+            for ore, prefab in ORES.items()}
+    out = {}
+    try:
+        names = sorted(os.listdir(directory))
+    except OSError:
+        return out
+    for name in names:
+        path = os.path.join(directory, name)
+        try:
+            st = os.stat(path)
+        except OSError:
+            continue
+        if not os.path.isfile(path):
+            continue
+        key = (path, st.st_size, st.st_mtime)
+        if cache is not None and key in cache:
+            found = cache[key]
+        else:
+            found = _ores_in(path, pats)
+            if cache is not None:
+                cache[key] = found
+        for ore, pts in found.items():
+            out.setdefault(ore, []).extend(pts)
+    if cache is not None and len(cache) > 400:
+        cache.clear()
+    return out
+
+
+def ore_png(points, edge, colour, span=None):
+    """One ore's deposits, as a transparent overlay.
+
+    A deposit is a point, and a point at twelve metres to the pixel is
+    invisible, so each is drawn as a small cross -- big enough to find,
+    small enough that a seam of two thousand tin does not become a smear.
+    """
+    span = MAP_SPAN if span is None else span
+    hit = bytearray(edge * edge)
+    for x, z in points:
+        cx = int((x + span) / (2 * span) * edge)
+        cy = int((span - z) / (2 * span) * edge)
+        for dx, dy in ((0, 0), (1, 0), (-1, 0), (0, 1), (0, -1)):
+            px, py = cx + dx, cy + dy
+            if 0 <= px < edge and 0 <= py < edge:
+                hit[py * edge + px] = 1
+
+    rows = bytearray()
+    for y in range(edge):
+        rows.append(0)
+        rows += hit[y * edge:(y + 1) * edge]
+
+    def chunk(kind, body):
+        return (struct.pack(">I", len(body)) + kind + body
+                + struct.pack(">I", zlib.crc32(kind + body) & 0xFFFFFFFF))
+
+    palette = bytes((0, 0, 0)) + bytes(colour)
+    return (b"\x89PNG\r\n\x1a\n"
+            + chunk(b"IHDR", struct.pack(">IIBBBBB", edge, edge, 8, 3, 0, 0, 0))
+            + chunk(b"PLTE", palette)
+            + chunk(b"tRNS", bytes([0, 255]))
+            + chunk(b"IDAT", zlib.compress(bytes(rows), 9))
+            + chunk(b"IEND", b""))
+
+
 def world_meta(fwl):
     """A world's name, seed and id, from its .fwl.
 
