@@ -5,7 +5,6 @@ to be read, and they live on whatever the backups are kept on -- a NAS, over
 the network, on the same box as the game servers. Read back to back and in
 full, that is enough to starve everything else of I/O.
 """
-import gzip
 import struct
 import zipfile
 
