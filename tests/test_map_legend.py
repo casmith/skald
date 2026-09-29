@@ -27,12 +27,18 @@ const plate = mk(); const viewer = mk();
 plate.classList = {
   toggle: (name, on) => { if (on === false) classes.delete(name); else classes.add(name); },
   contains: n => classes.has(n),
+  // the script adds `ready` once the fog has arrived; not a layer, so the
+  // assertions below ignore it
+  add: n => { if (n !== 'ready') classes.add(n); },
+  remove: n => classes.delete(n),
 };
 const legend = mk();
 legend.addEventListener = (kind, fn) => { if (kind === 'change') handler = fn; };
 function mk() {
   return {style: {setProperty(){}, transform: ''}, className: '', hidden: true,
     appendChild(){}, addEventListener(){}, toggleAttribute(){},
+    querySelector: () => null,
+    classList: {add(){}, remove(){}, toggle(){}, contains: () => false},
     getBoundingClientRect: () => ({left:0,top:0,width:10,height:10,bottom:10}),
     clientWidth: 600, offsetWidth: 50, offsetHeight: 20,
     dataset: {}, set innerHTML(v) {}, get innerHTML() { return ''; }};

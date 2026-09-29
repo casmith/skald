@@ -2808,6 +2808,10 @@ def render_map(requested, shared=None, seeds=None, fog=True,
     over = "&over=1" if terrain else ""
     # Showing the terrain with the fog off is how you tell a wrong map from
     # a wrongly-placed one.
+    # Enforced here rather than by leaving the link out: a query string is
+    # not a permission, and ?fog=0 would work whatever the page offered.
+    if not CONFIG.allow_fog_off:
+        fog = True
     show_fog = fog and pick.get("fog", True)
     # Three layers, three links, and each has to carry the other two's
     # setting -- a toggle that silently turns the others back on is worse
@@ -2889,7 +2893,8 @@ def render_map(requested, shared=None, seeds=None, fog=True,
 
     toggle = (f'<a href="/map?world={pick["key"]}&fog={"0" if fog else "1"}">'
               f'{"hide" if fog else "show"} fog of war</a>'
-              if pick.get("fog", True) and terrain else "")
+              if pick.get("fog", True) and terrain and CONFIG.allow_fog_off
+              else "")
     note = (" &middot; terrain drawn from the world seed; the lit part is what "
             "the group has explored" if terrain else "")
     body = (f'<p class="facts"><b>{label}</b>{when} &middot; {share:.2f}% of the map '
@@ -2950,7 +2955,12 @@ MAP_PAGE = """<!doctype html>
   touch-action:none;user-select:none;-webkit-user-select:none}
  .viewer img{-webkit-user-drag:none}
  .viewer:active{cursor:grabbing}
- .plate{position:absolute;inset:0;transform-origin:0 0}
+ /* The terrain and the fog are two pictures that arrive separately, and
+    whichever lands first is what you see -- so a cached terrain with an
+    uncached fog showed the whole world for a moment. Nothing is shown
+    until the fog is on it. */
+ .plate{position:absolute;inset:0;transform-origin:0 0;visibility:hidden}
+ .plate.ready{visibility:visible}
  /* Shown in place of the terrain while it is being worked out. It sits
     where the picture will be, so the page does not jump when it arrives. */
  .drawing{position:absolute;inset:0;pointer-events:none;display:flex;flex-direction:column;
@@ -3134,6 +3144,18 @@ __BODY__
    // that is four screen pixels and they are one blob, and at 16x they are
    // a comfortable gap. So the grouping is worked out again on every zoom,
    // and a marker says how many are under it.
+   // Show the map only once the fog is on it. On error, and after a few
+   // seconds regardless, show it anyway: a map that never appears is worse
+   // than one that appears late.
+   function reveal() { plate.classList.add('ready'); }
+   var fogImg = plate.querySelector('img.fog');
+   if (!fogImg || fogImg.complete) {
+     reveal();
+   } else {
+     fogImg.addEventListener('load', reveal);
+     fogImg.addEventListener('error', reveal);
+     setTimeout(reveal, 4000);
+   }
    var portalBox = document.getElementById('portals');
    var portalData = [];
    if (portalBox) {

@@ -39,6 +39,10 @@ DEFAULTS = {
     # every vein on the map retires that, and it is not this program's place
     # to decide that for somebody's server.
     "show_ores": False,
+    # Whether anyone may take the fog off and see the whole world. It is a
+    # mild thing next to the ore, but it is still the map without having
+    # earned it, so the person running the server decides.
+    "allow_fog_off": True,
 }
 
 # setting -> (canonical variable, older aliases that still work)
@@ -58,6 +62,7 @@ ENV = {
     "steam_api_key": ("SKALD_STEAM_API_KEY",),
     "session_days": ("SKALD_SESSION_DAYS",),
     "show_ores": ("SKALD_SHOW_ORES",),
+    "allow_fog_off": ("SKALD_ALLOW_FOG_OFF",),
 }
 WORLDS_ENV = ("SKALD_WORLDS", "TRACKER_SERVERS")
 # "World=/path/to/log,Other=/path" for people who would rather not write the
@@ -65,7 +70,7 @@ WORLDS_ENV = ("SKALD_WORLDS", "TRACKER_SERVERS")
 LOGS_ENV = ("SKALD_LOG_FILES",)
 INTS = {"port", "poll_seconds", "save_scan_seconds", "chart_days",
         "merge_gap_seconds", "session_days"}
-BOOLS = {"show_ores"}
+BOOLS = {"show_ores", "allow_fog_off"}
 # What counts as yes in the environment. Anything else, including an empty
 # variable, is no -- so setting it to "false" turns it off rather than on,
 # which is what someone writing that plainly meant.
@@ -94,6 +99,7 @@ class Config:
     steam_api_key: str = DEFAULTS["steam_api_key"]
     session_days: int = DEFAULTS["session_days"]
     show_ores: bool = DEFAULTS["show_ores"]
+    allow_fog_off: bool = DEFAULTS["allow_fog_off"]
     timezone: str = DEFAULTS["timezone"]
     default_world: str = DEFAULTS["default_world"]
     events_dir: str = DEFAULTS["events_dir"]

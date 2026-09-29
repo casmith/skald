@@ -22,10 +22,12 @@ HARNESS = """
 let handler = null, drawn = '';
 function mk() {
   return {style:{setProperty(){}, transform:''}, className:'', hidden:true,
-    appendChild(){}, addEventListener(){}, toggleAttribute(){}, dataset:{},
+    appendChild(){}, addEventListener(){}, toggleAttribute(){},
+    querySelector: () => null,
+    classList: {add(){}, remove(){}, toggle(){}, contains: () => false}, dataset:{},
     getBoundingClientRect: () => ({left:0,top:0,width:10,height:10,bottom:10}),
     clientWidth:600, offsetWidth:50, offsetHeight:20,
-    classList:{toggle(){}, contains(){return false;}},
+    classList:{add(){}, remove(){}, toggle(){}, contains(){return false;}},
     set innerHTML(v){}, get innerHTML(){ return ''; }};
 }
 const portalBox = mk(); portalBox.dataset.portals = JSON.stringify(%s);

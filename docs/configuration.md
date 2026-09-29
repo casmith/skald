@@ -44,6 +44,7 @@ backups_dir = "/mnt/backups/utgard"
 | `steam_api_key` | `SKALD_STEAM_API_KEY` | — | Optional: a free Steam Web API key, for display names and avatars |
 | `session_days` | `SKALD_SESSION_DAYS` | `30` | How long a sign-in lasts |
 | `show_ores` | `SKALD_SHOW_ORES` | off | Show where the ore still is. See below |
+| `allow_fog_off` | `SKALD_ALLOW_FOG_OFF` | on | Whether anyone may take the fog off and see the whole world |
 
 A world's `saves_dir` and `backups_dir` override the roots for that world
 alone.

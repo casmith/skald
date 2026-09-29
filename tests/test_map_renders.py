@@ -27,6 +27,8 @@ const box = {dataset: {portals: JSON.stringify(portals)},
              set innerHTML(v) { built = v; }, get innerHTML() { return built; }};
 const stub = () => ({style: {setProperty(){}, transform: ''}, className: '',
   hidden: true, appendChild(){}, addEventListener(){}, toggleAttribute(){},
+    querySelector: () => null,
+    classList: {add(){}, remove(){}, toggle(){}, contains: () => false},
   getBoundingClientRect: () => ({left:0, top:0, width:10, height:10, bottom:10}),
   clientWidth: %d, offsetWidth: 50, offsetHeight: 20});
 const viewer = stub(), plate = stub();
