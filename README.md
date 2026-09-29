@@ -17,6 +17,22 @@ nothing written back to your world.
 badges](docs/screenshots/dashboard.png)
 
 <details>
+<summary><b>The map</b> — the world drawn from its own seed</summary>
+
+![The map: terrain generated from the world seed, with portals, buildings,
+boats and corpses over it](docs/screenshots/map.png)
+
+Valheim stores no terrain. It rebuilds the world from one number every time
+it loads, which is why a ten-kilometre world fits in a few megabytes — and
+why drawing a map means doing the same arithmetic rather than reading a
+picture. Over that goes everything your cartography table has shared, and
+the things worth finding again: portals and where they lead, whatever
+anybody has built, the boat somebody moved, and the corpse nobody has been
+back for.
+
+</details>
+
+<details>
 <summary><b>The 7-day forecast</b>, and what a phone sees</summary>
 
 ![The forecast: 20 weather turns as an icon grid](docs/screenshots/forecast.png)
@@ -69,11 +85,19 @@ server](#trying-it-without-a-server).)*
   yours, greets you by the one you play most, gives you a page of your own
   numbers, and can post to a Discord webhook when someone comes online or a
   boss falls. Nothing changes for people who do not sign in.
-  yours, greets you by the one you play most, and gives you a page of your
-  own numbers. Nothing changes for people who do not sign in.
 - **A group map on real terrain** — the world drawn from its own seed, with
-  everything the cartography table has shared laid over it, and nothing to
-  upload. A character file works too, for worlds with no table.
+  everything your cartography table has shared laid over it. Nothing is
+  uploaded and nothing leaves the machine; it is read from the save the
+  server is already writing.
+- **Layers on that map**, each a checkbox: the pins your group has placed,
+  split by kind; portals, with the names you gave them and a line to the
+  other end when you tap one; everywhere you have built, drawn as
+  firelight; corpses nobody has fetched yet, including the ones inside
+  caves; and boats, because a longship is wherever somebody last left it.
+- **Where the ore still is** — silver, copper, tin and obsidian — if the
+  person running the server turns it on. Off otherwise, and unticked even
+  then: putting every silver vein on the map does rather retire the
+  wishbone, so it is nobody's decision but theirs.
 - JSON for all of it, if you would rather build your own view.
 
 ## How it knows

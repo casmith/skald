@@ -67,3 +67,42 @@ def test_a_world_where_nobody_has_died_reads_as_nothing(tmp_path):
     path = tmp_path / "e.chunk"
     path.write_bytes(b"peaceful" * 200)
     assert fch._corpses_in(str(path)) == []
+
+
+def test_the_map_still_says_where_it_came_from(monkeypatch):
+    """A corpse marker once reused the name the map's own description lives
+    under, so the line under the title said "indoors" instead of explaining
+    where the map came from -- and said nothing at all on a world whose last
+    corpse was outside.
+
+    Checked against that line alone. Looking for the words anywhere on the
+    page passes whatever happens, because the footer says them too, which is
+    how the first version of this test managed to pass on the bug.
+    """
+    import re
+
+    from skald import app
+
+    monkeypatch.setattr(app, "WORLD_MAPS", {
+        "Jotunheim": {"edge": 2048, "seen": 1000, "explored": b"", "pins": []}})
+    monkeypatch.setattr(app, "WORLD_PORTALS", {})
+    monkeypatch.setattr(app, "WORLD_BUILT", {})
+    monkeypatch.setattr(app, "WORLD_BOATS", {})
+    monkeypatch.setattr(app, "terrain_png", lambda w: None)
+
+    for corpses in ([{"name": "Ulf", "x": 20.0, "z": 20.0, "indoors": True}],
+                    [{"name": "Hegg", "x": 10.0, "z": 10.0, "indoors": False}],
+                    []):
+        monkeypatch.setattr(app, "WORLD_CORPSES", {"Jotunheim": corpses})
+        page = app.render_map("Jotunheim",
+                              shared={"Jotunheim": {"edge": 2048, "seen": 1000}},
+                              seeds={"Jotunheim": {"seed": 1, "seed_name": "x"}})
+        facts = re.search(r'<p class="facts">.*?</p>', page, re.S).group(0)
+        assert "cartography table" in facts, facts
+        assert "indoors" not in facts, facts
+
+
+def test_the_map_page_does_not_offer_the_upload_any_more():
+    from skald.app import MAP_PAGE
+    assert "add yours" not in MAP_PAGE
+    assert "/me" not in MAP_PAGE
