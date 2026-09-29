@@ -185,11 +185,16 @@ def test_a_character_who_has_been_nowhere_is_not_an_error():
     assert fch.parse(blob) == {"version": 46, "worlds": []}
 
 
-def test_the_dashboard_points_at_the_map():
+def test_the_dashboard_points_at_the_map_you_are_looking_at():
     """It was reachable only from your own page, which is a strange place to
-    hide the thing everyone shares."""
+    hide the thing everyone shares -- and then it went to whichever world the
+    map happened to list first, rather than the one whose dashboard you were
+    reading.
+    """
     from skald.app import PAGE
-    assert 'href="/map"' in PAGE
+    assert 'href="/map__Q__"' in PAGE, "the map link drops the world"
+    # __Q__ is the ?world= the rest of the dashboard's links already carry.
+    assert "__Q__" in PAGE
 
 
 def test_nothing_offers_to_take_a_character_file_any_more():
