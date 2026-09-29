@@ -68,3 +68,42 @@ def test_the_day_drawing_is_unchanged_by_any_of_it():
 
 def test_nothing_built_draws_nothing_at_night():
     assert fch.construction_png([], 64, night=True) is not None
+
+
+def _page(night, monkeypatch):
+    from skald import app
+    monkeypatch.setattr(app, "WORLD_MAPS", {
+        "Midgard": {"edge": 2048, "seen": 1000, "explored": b"", "pins": [
+            {"name": "x", "x": 0.0, "z": 0.0, "type": 3, "crossed": False}]}})
+    monkeypatch.setattr(app, "WORLD_PORTALS", {
+        "Midgard": [{"name": "a", "x": 0.0, "y": 30.0, "z": 0.0}]})
+    monkeypatch.setattr(app, "WORLD_BUILT", {"Midgard": [(0.0, 0.0, False)]})
+    monkeypatch.setattr(app, "WORLD_BOATS", {
+        "Midgard": [{"kind": "karve", "x": 0.0, "z": 0.0}]})
+    monkeypatch.setattr(app, "WORLD_CORPSES", {
+        "Midgard": [{"name": "u", "x": 0.0, "z": 0.0, "indoors": False}]})
+    monkeypatch.setattr(app, "terrain_png", lambda w: b"PNG")
+    return app.render_map("Midgard",
+                          shared={"Midgard": {"edge": 2048, "seen": 1000}},
+                          seeds={"Midgard": {"seed": 1, "seed_name": "x"}},
+                          night=night)
+
+
+def test_at_night_only_the_lights_are_on(monkeypatch):
+    """Two hundred portal labels over a photograph of a city is not the
+    view. They are boxes though, not decisions."""
+    import re
+    page = _page(True, monkeypatch)
+    ticked = set(re.findall(r'<input type="checkbox" checked data-layer="(\w+)"', page))
+    assert ticked == {"built"}, ticked
+    # and the map starts that way rather than flashing them on
+    plate = re.search(r'class="plate([^"]*)"', page).group(1)
+    for layer in ("portals", "boat", "corpse", "spot"):
+        assert f"off-{layer}" in plate, f"{layer} is ticked off but still drawn"
+
+
+def test_by_day_they_are_all_on(monkeypatch):
+    import re
+    page = _page(False, monkeypatch)
+    ticked = set(re.findall(r'<input type="checkbox" checked data-layer="(\w+)"', page))
+    assert {"built", "portals", "boat", "corpse"} <= ticked, ticked

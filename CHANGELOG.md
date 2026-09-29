@@ -11,6 +11,9 @@
   what is burning.
 - The scale is absolute and logarithmic, so two worlds can be compared and
   the range from a hut to a capital fits in eight steps.
+- At night only the lights are on. Two hundred portal labels over a photograph
+  of a city is not the view — but they are boxes, not decisions, so tick one
+  and it comes back.
 
 ## 0.21.0
 

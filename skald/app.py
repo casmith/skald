@@ -2878,6 +2878,12 @@ def render_map(requested, shared=None, seeds=None, fog=True,
         rows.append(("corpse", "\u2020", "corpses", len(world_corpses), True))
     for ore in world_ores:
         rows.append((ore, "\u25c6", ore, len(ores[ore]), False))
+    # At night only the lights are on. Everything else is a label over a
+    # photograph of a city, and the point of the view is the glow -- but
+    # they are boxes, not decisions, so tick one and it comes back.
+    if night:
+        rows = [(k, glyph, what, n, k == "built")
+                for k, glyph, what, n, _ in rows]
     # A layer that starts unticked has to start hidden too, or the first
     # thing you see is the opposite of what the box says.
     off_at_first = "".join(f" off-{k}" for k, _, _, _, on in rows if not on)
