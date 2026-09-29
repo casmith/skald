@@ -10,7 +10,6 @@
   `SKALD_ALLOW_FOG_OFF=0` refuses it, and refuses it on the server rather
   than by leaving the link out — a query string is not a permission. Allowed
   by default, which is what it did before.
-
 - The explored figure counts the world, not the picture. The map is drawn
   square but Valheim's world is a disc ending 10,500 metres out, and the
   corners are somewhere nobody can sail to — so every figure was about 1.7
