@@ -50,7 +50,6 @@ import json
 import os
 import re
 import struct
-import zlib
 import sys
 import threading
 import time
@@ -1587,21 +1586,6 @@ def refresh_world_maps():
             print(f"construction for {world}: {e}", flush=True)
 
 
-def merged_map(world_uid):
-    """Everyone's exploration of one world, added together."""
-    rows = store.maps_for(db(), world_uid)
-    if not rows:
-        return None
-    edge = max(r["edge"] for r in rows)
-    bits, pins, people = b"", [], []
-    for r in rows:
-        bits = fch.merge(bits, zlib.decompress(r["explored"]))
-        pins.extend(json.loads(r["pins"]))
-        people.append(r["steam_id"])
-    return {"edge": edge, "bits": bits, "pins": pins, "people": len(people),
-            "seen": sum(bin(b).count("1") for b in bits)}
-
-
 def worlds_of(h):
     """Tab order: TRACKER_SERVERS order (the default world first), then any
     world seen only in the logs."""
@@ -2173,6 +2157,16 @@ PAGE = """<!doctype html>
  #tip{position:fixed;pointer-events:none;background:#0b0907;color:var(--fg);border:1px solid var(--bronze);
   font-size:12px;
   padding:.25rem .55rem;border-radius:2px;display:none;white-space:nowrap}
+ /* The map is a page of its own rather than a panel here, because this
+    page reloads itself every minute and that would throw away wherever you
+    had scrolled and zoomed to. A link keeps it. */
+ .gomap{display:flex;flex-wrap:wrap;align-items:baseline;gap:.2rem .6rem;
+   margin:.9rem 0 .2rem}
+ .gomap a{font-size:1.05rem;font-weight:700;color:#e8b25a;text-decoration:none;
+   border-bottom:1px solid #8a6a3f}
+ .gomap a:hover{color:#f3cd8a}
+ .gomap a::after{content:" \\2192"}
+ .gomap span{font-size:.82rem;color:var(--muted)}
  details{margin-top:.6rem} summary{cursor:pointer;color:var(--muted)}
  details table{margin-top:.5rem}
 </style></head><body>
@@ -2186,6 +2180,8 @@ PAGE = """<!doctype html>
  <a href="/api/online__Q__">online</a> &middot; <a href="/api/playtime__Q__">playtime</a> &middot;
  <a href="/api/daily__Q__">daily</a> JSON &middot; <a href="/diagnostics">diagnostics</a></div>
 __WHO__
+<p class="gomap"><a href="/map">The group map</a><span>terrain, where everyone has
+ been, the pins, the portals and everything built</span></p>
 <nav class="tabs" aria-label="Worlds">__TABS__</nav>
 __CARD__
 __WORLD__
@@ -2347,7 +2343,7 @@ def yes_no(ok, good="yes", bad="no"):
 
 
 def render_me(user, chars, rows_db, stats=None, sub=None, rejected=False,
-              maps=(), world_names=None, note=""):
+              world_names=None, note=""):
     """Your page: your numbers, your characters, your last few evenings."""
     state = {r["name"]: r for r in rows_db}
     primary = next((r["name"] for r in rows_db if r["is_primary"]), None)
@@ -2399,38 +2395,7 @@ def render_me(user, chars, rows_db, stats=None, sub=None, rejected=False,
             .replace("__LEAD__", f'<p class="note">{lead}</p>' if lead else "")
             .replace("__SESSIONS__", render_my_sessions(stats))
             .replace("__NOTIFY__", render_notify(sub, rejected))
-            .replace("__MAPS__", render_my_maps(maps, world_names or {}, note)))
-
-
-def render_my_maps(maps, world_names, note=""):
-    """Upload a character file; keep the map, discard the character."""
-    rows = "".join(
-        f'<tr><td><b>{html.escape(world_names.get(m["world_uid"], str(m["world_uid"])))}'
-        f'</b></td><td>{m["seen"] / (m["edge"] ** 2) * 100:.1f}% seen</td>'
-        f'<td>{t(m["uploaded"])}</td><td class="act">'
-        f'<form method="post" action="/me/map/drop">'
-        f'<input type="hidden" name="world" value="{m["world_uid"]}">'
-        f'<button type="submit">remove</button></form></td></tr>'
-        for m in maps)
-    table = ('<div class="wrap"><table><thead><tr><th>World</th><th>Explored</th>'
-             '<th>Uploaded</th><th></th></tr></thead><tbody>'
-             f'{rows}</tbody></table></div>' if rows else "")
-    said = f'<p class="facts">{html.escape(note)}</p>' if note else ""
-    return ('<h2>Your map</h2>' + said + table
-            + '<form method="post" action="/me/map" enctype="multipart/form-data" '
-              'class="notify"><input type="file" name="character" accept=".fch" '
-              'required><button type="submit">upload</button></form>'
-            '<p class="note">Your character file, from '
-            '<span class="mono">Steam/userdata/&lt;id&gt;/892970/remote/characters</span> '
-            'if the game saves to the cloud, otherwise '
-            '<span class="mono">AppData/LocalLow/IronGate/Valheim/characters</span> '
-            'on Windows or <span class="mono">~/.config/unity3d/IronGate/Valheim/'
-            'characters</span> on Linux &mdash; which can be years stale once cloud '
-            'saves are on, so check the dates. Skald reads the header and the map and '
-            '<b>stops</b>: your inventory, skills, appearance and journal sit after '
-            'the part it parses and are never decoded, so there is nothing else for '
-            'it to keep. What it does keep &mdash; where you have been, and your '
-            'pins &mdash; is merged into <a href="/map">the group map</a>.</p>')
+            )
 
 
 def ordinal(n):
@@ -2620,7 +2585,6 @@ __BODY__
 __LEAD__
 __SESSIONS__
 __NOTIFY__
-__MAPS__
 <p class="note">Only characters this Steam account has been seen playing are listed &mdash; Skald
  reads that pairing from the server&rsquo;s own log, so there is nothing to type in, nothing to
  prove, and no way to take a character you have not played. None of it is public: your
@@ -2633,7 +2597,7 @@ __MAPS__
 </body></html>"""
 
 
-def render_map(names, mapped, requested, shared=None, seeds=None, fog=True):
+def render_map(requested, shared=None, seeds=None, fog=True):
     """The group's map.
 
     Two sources, and the first is far the better one. A world's own save
@@ -2652,18 +2616,11 @@ def render_map(names, mapped, requested, shared=None, seeds=None, fog=True):
         entries.append({"key": world, "label": world, "n": None,
                         "seen": m["seen"] if m else 0,
                         "edge": m["edge"] if m else TERRAIN_SIZE,
-                        "table": True, "fog": bool(m)})
-    entries += [{"key": str(m["world_uid"]),
-                 "label": names.get(m["world_uid"], str(m["world_uid"])),
-                 "n": m["people"], "seen": None, "edge": m["edge"],
-                 "table": False, "fog": True}
-                for m in sorted(mapped, key=lambda m: -m["newest"])]
+                        "fog": bool(m)})
     if not entries:
         return MAP_PAGE.replace("__TABS__", "").replace("__BODY__",
             '<p class="empty">No world has a shared map yet. A cartography '
-            'table in any world Skald watches gives one automatically &mdash; '
-            'or sign in, open <a href="/me">your page</a>, and upload a '
-            'character file.</p>')
+            'table in any world Skald watches gives one automatically.</p>')
     pick = next((e for e in entries if e["key"] == requested), entries[0])
     tabs = "".join(
         f'<a class="tab{" on" if e is pick else ""}" href="/map?world={e["key"]}">'
@@ -2672,21 +2629,14 @@ def render_map(names, mapped, requested, shared=None, seeds=None, fog=True):
         + "</a>"
         for e in entries)
 
-    if pick["table"]:
-        seen, edge = pick["seen"], pick["edge"]
-        where = ("from this world&rsquo;s cartography table &mdash; everything "
-                 "anyone has shared to it" if pick["fog"] else
-                 "nobody has shared a map of this one yet &mdash; build a "
-                 "cartography table and it appears here")
-    else:
-        merged = merged_map(int(pick["key"]))
-        seen, edge = merged["seen"], merged["edge"]
-        people = merged["people"]
-        where = (f'{people} uploaded character{"" if people == 1 else "s"}, '
-                 f'merged &middot; {len(merged["pins"])} pins')
+    seen, edge = pick["seen"], pick["edge"]
+    where = ("from this world&rsquo;s cartography table &mdash; everything "
+             "anyone has shared to it" if pick["fog"] else
+             "nobody has shared a map of this one yet &mdash; build a "
+             "cartography table and it appears here")
     share = seen / (edge ** 2) * 100 if edge else 0
     label = html.escape(pick["label"])
-    meta = seeds.get(pick["label"]) if pick["table"] else None
+    meta = seeds.get(pick["label"])
     seed_line = terrain = ""
     if meta:
         seed_line = (f' &middot; seed <b>{html.escape(meta["seed_name"])}</b>'
@@ -2711,8 +2661,7 @@ def render_map(names, mapped, requested, shared=None, seeds=None, fog=True):
     # The table's pins, laid over the same square the images fill. Placed as
     # a percentage of the plate rather than in pixels, so they follow the
     # zoom without any arithmetic of their own.
-    world_pins = (WORLD_MAPS.get(pick["label"], {}).get("pins", [])
-                  if pick["table"] else [])
+    world_pins = WORLD_MAPS.get(pick["label"], {}).get("pins", [])
     marks = ""
     if world_pins:
         span = fch.MAP_SPAN
@@ -2734,7 +2683,7 @@ def render_map(names, mapped, requested, shared=None, seeds=None, fog=True):
     # Portals are few and carry names worth reading, so they get their name
     # beside them rather than a tooltip. Two sharing a name are the two ends
     # of one.
-    world_portals = (WORLD_PORTALS.get(pick["label"], []) if pick["table"] else [])
+    world_portals = WORLD_PORTALS.get(pick["label"], [])
     if world_portals:
         span = fch.MAP_SPAN
         ends = collections.Counter(p["name"] for p in world_portals if p["name"])
@@ -2767,7 +2716,7 @@ def render_map(names, mapped, requested, shared=None, seeds=None, fog=True):
     # Three layers, three links, and each has to carry the other two's
     # setting -- a toggle that silently turns the others back on is worse
     # than no toggle.
-    world_built = (WORLD_BUILT.get(pick["label"], []) if pick["table"] else [])
+    world_built = WORLD_BUILT.get(pick["label"], [])
 
     # The legend. Everything is drawn and the boxes decide what is seen, so
     # a change costs nothing and -- the point of it -- does not throw away
@@ -2953,10 +2902,8 @@ MAP_PAGE = """<!doctype html>
 <nav class="tabs">__TABS__</nav>
 __BODY__
 <p class="muted" style="font-size:.85rem">A world&rsquo;s map comes from its own
- cartography table, read from the save Skald already has: nothing is uploaded and nothing
- leaves the server. For a world without a table, an uploaded character works too &mdash;
- only its explored mask and pins are kept, because nothing else in the file is ever
- parsed.</p>
+ cartography table, read from the save Skald already has: everything anyone has shared to
+ it, kept current by the game. Nothing is uploaded and nothing leaves the server.</p>
 <script>
  // Pan and zoom, in the least code that behaves properly: one transform on
  // the plate, and the wheel zooms about the pointer rather than the corner,
@@ -3361,69 +3308,11 @@ class Handler(BaseHTTPRequestHandler):
             if token:
                 store.end_session(db(), auth.token_hash(token))
             return self._redirect("/", auth.clear_cookie_header(CONFIG.secure_cookies))
-        if path in ("/me/map", "/me/map/drop"):
-            return self._map_post(path)
         if path in ("/me/notify", "/me/notify/test", "/me/notify/off"):
             return self._notify_post(path)
         if path in ("/me/primary", "/me/hide", "/me/mine"):
             return self._me_post(path)
         self._send(404, "not found", "text/plain")
-
-    def _upload(self):
-        """The one file out of a multipart body. Bounded before it is read.
-
-        A hand-rolled parser because the standard library no longer ships
-        one: `cgi` was removed in 3.13. It wants only a single part, so it
-        does the least that can be correct -- find the boundary, take the
-        bytes between the first part's blank line and the next boundary.
-        """
-        ctype = self.headers.get("Content-Type", "")
-        if "multipart/form-data" not in ctype or "boundary=" not in ctype:
-            raise fch.Bad("that was not a file upload")
-        try:
-            length = int(self.headers.get("Content-Length") or 0)
-        except ValueError:
-            raise fch.Bad("no length") from None
-        if length <= 0 or length > MAX_UPLOAD:
-            raise fch.Bad(f"a character file should be under "
-                          f"{MAX_UPLOAD // (1024 * 1024)} MB")
-        boundary = ctype.split("boundary=", 1)[1].strip().strip('"').encode()
-        body = self.rfile.read(length)
-        parts = body.split(b"--" + boundary)
-        for part in parts:
-            head, _, rest = part.partition(b"\r\n\r\n")
-            if b'filename="' in head and rest:
-                return rest.rsplit(b"\r\n", 1)[0]
-        raise fch.Bad("no file was attached")
-
-    def _map_post(self, path):
-        user = current_user(self.headers)
-        if not user:
-            return self._send(403, "sign in first", "text/plain")
-        conn, steam_id = db(), user["steam_id"]
-        if path == "/me/map/drop":
-            uid = self._form().get("world", "")
-            if uid.lstrip("-").isdigit():
-                store.drop_map(conn, steam_id, int(uid))
-            return self._redirect("/me")
-        try:
-            blob = self._upload()
-            got = fch.parse(blob)
-        except fch.Bad as e:
-            return self._redirect("/me?map=" + urllib.parse.quote(str(e)))
-        except Exception:
-            return self._redirect("/me?map=" + urllib.parse.quote(
-                "that file could not be read as a character file"))
-        now = time.time()
-        for w in got["worlds"]:
-            packed = fch.pack(w["explored"])
-            store.put_map(conn, steam_id, w["uid"], w["edge"],
-                          zlib.compress(packed, 9), w["pins"],
-                          sum(bin(b).count("1") for b in packed), now)
-        n = len(got["worlds"])
-        return self._redirect("/me?map=" + urllib.parse.quote(
-            f"{n} world{'' if n == 1 else 's'} taken from that character"
-            if n else "that character has not explored anywhere yet"))
 
     def _notify_post(self, path):
         user = current_user(self.headers)
@@ -3488,20 +3377,11 @@ class Handler(BaseHTTPRequestHandler):
             v = params.get(name, [""])[0]
             return int(v) if v.isdigit() else default
 
-        # Before the tab handling below: on these two, ?world= is a world's
-        # uid from a character file, not one of Skald's world names, and
-        # pick_world would turn it into a 404.
         if path == "/map.png":
             want = params.get("world", [""])[0]
-            # A world's own name means its cartography table; a number means
-            # a map somebody uploaded, which is keyed by the world's id.
             shared = WORLD_MAPS.get(want)
-            if shared:
-                merged = {"bits": shared["explored"], "edge": shared["edge"]}
-            elif want.lstrip("-").isdigit():
-                merged = merged_map(int(want))
-            else:
-                merged = None
+            merged = ({"bits": shared["explored"], "edge": shared["edge"]}
+                      if shared else None)
             if not merged:
                 return self._send(404, "no map for that world", "text/plain")
             # Over terrain the fog is a multiply mask, so explored ground has
@@ -3545,9 +3425,7 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             return self.wfile.write(body)
         if path == "/map":
-            return self._send(200, render_map(world_names_by_uid(),
-                                              store.mapped_worlds(db()),
-                                              params.get("world", [""])[0],
+            return self._send(200, render_map(params.get("world", [""])[0],
                                               dict(WORLD_MAPS),
                                               {w: world_metadata(w)
                                                for w in sorted(SERVERS)},
@@ -3607,7 +3485,6 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, render_me(user, mine, rows, stats,
                                       store.subscription(db(), user["steam_id"]),
                                       "webhook=rejected" in (query or ""),
-                                      store.my_maps(db(), user["steam_id"]),
                                       world_names_by_uid(),
                                       urllib.parse.unquote(
                                           params.get("map", [""])[0])),
