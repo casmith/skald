@@ -797,6 +797,17 @@ GLOW_ALPHA = (0, 45, 85, 125, 160, 190, 215, 235, 255)
 GLOW_FULL = 120
 
 
+# At night the halo is smaller. The wide stamp reads as firelight over a
+# settlement, which is what the day view wants; from orbit a town is a point,
+# and a soft edge four hundred metres across turns a village into a smudge.
+_NIGHT_GLOW = (
+    (0, 1, 2, 1, 0),
+    (1, 5, 10, 5, 1),
+    (2, 10, 20, 10, 2),
+    (1, 5, 10, 5, 1),
+    (0, 1, 2, 1, 0),
+)
+
 # Seen from orbit at night. A city is a white core inside an orange halo;
 # a single hut on a headland is one dim ember, but still there.
 NIGHT_COLOURS = (
@@ -804,12 +815,12 @@ NIGHT_COLOURS = (
     (216, 140, 52), (238, 182, 96), (250, 218, 156), (255, 244, 214),
 )
 NIGHT_ALPHA = (0, 70, 110, 145, 175, 200, 225, 242, 255)
-# What counts as a city, measured rather than guessed: a settlement of a
-# couple of thousand pieces peaks around here. The scale is absolute so two
+# What counts as a city, measured rather than guessed: with the stamp
+# above, a settlement of a couple of thousand pieces peaks around here. The scale is absolute so two
 # worlds can be compared, and logarithmic so the range from one hut to a
 # capital fits in eight steps -- a hut lands around the fourth, a hamlet the
 # sixth, a town the seventh, a city white.
-NIGHT_FULL = 8000
+NIGHT_FULL = 2800
 _NIGHT_LOG = math.log1p(NIGHT_FULL)
 
 
@@ -832,13 +843,14 @@ def construction_png(points, edge, span=None, night=False):
     # the same brightness: the range has to survive the counting before the
     # palette can show it.
     light = array.array("I", bytes(4 * edge * edge))
-    half = len(_GLOW) // 2
+    kernel = _NIGHT_GLOW if night else _GLOW
+    half = len(kernel) // 2
     for point in points:
         x, z = point[0], point[1]
         weight = LIGHT_WEIGHT if (night and len(point) > 2 and point[2]) else 1
         cx = int((x + span) / (2 * span) * edge)
         cy = int((span - z) / (2 * span) * edge)
-        for dy, row in enumerate(_GLOW):
+        for dy, row in enumerate(kernel):
             py = cy + dy - half
             if not 0 <= py < edge:
                 continue

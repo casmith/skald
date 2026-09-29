@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.22.1
+
+- A tighter halo on the night lights. The wide stamp reads as firelight over
+  a settlement, which is what the day view wants, but from orbit a town is a
+  point and a soft edge four hundred metres across turned a village into a
+  smudge. The brightness steps are unchanged; the scale was recalibrated to
+  the smaller stamp so a city still burns white.
+
 ## 0.22.0
 
 - **The map at night.** A second view of the same world with the ground
