@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.19.0
+
+- **Boats on the map**, by kind — raft, karve, longship, drakkar — because a
+  longship is wherever somebody last left it, which is rarely where you
+  moored it. Toggleable like everything else.
+- **The map page said "indoors" where it should have explained itself.** A
+  corpse marker was using the same name as the map's own description, so the
+  line under the title was replaced by a stray word — or by nothing at all,
+  on a world whose last corpse was outside.
+- The map page no longer offers to take a character file; that went in
+  0.16.0 and the link stayed behind.
+- **The demo now builds a world**, not just a month of history: a seed, a
+  cartography table with pins on it, portals, boats, a village and somebody
+  still lying in a crypt. `tools/demo.py` was the one way to see Skald
+  without a server, and the map — the part most worth seeing — was blank in
+  it. It is also what the screenshots are made from, so the README can show
+  the map without putting a real player's name in the repository.
+
 ## 0.18.0
 
 - **Corpses on the map**, with whose they are. A tombstone lasts until

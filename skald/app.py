@@ -1379,6 +1379,9 @@ _ORE_FILES = {}
 # world -> the corpses still lying in it
 WORLD_CORPSES = {}
 _CORPSE_FILES = {}
+# world -> the boats in it, wherever somebody left them
+WORLD_BOATS = {}
+_BOAT_FILES = {}
 _CARTO_FILES = {}
 
 
@@ -1621,6 +1624,11 @@ def refresh_world_maps():
                 directory, _BUILT_FILES.setdefault(world, {}))
         except Exception as e:                     # a save mid-write, say
             print(f"construction for {world}: {e}", flush=True)
+        try:
+            WORLD_BOATS[world] = fch.world_boats(
+                directory, _BOAT_FILES.setdefault(world, {}))
+        except Exception as e:                     # a save mid-write, say
+            print(f"boats for {world}: {e}", flush=True)
         try:
             WORLD_CORPSES[world] = fch.world_corpses(
                 directory, _CORPSE_FILES.setdefault(world, {}))
@@ -2765,6 +2773,20 @@ def render_map(requested, shared=None, seeds=None, fog=True):
     # setting -- a toggle that silently turns the others back on is worse
     # than no toggle.
     world_built = WORLD_BUILT.get(pick["label"], [])
+    world_boats = WORLD_BOATS.get(pick["label"], [])
+    if world_boats:
+        span = fch.MAP_SPAN
+        out = []
+        for boat in world_boats:
+            left = (boat["x"] + span) / (2 * span) * 100
+            top = (span - boat["z"]) / (2 * span) * 100
+            if not 0 <= left <= 100 or not 0 <= top <= 100:
+                continue
+            out.append(
+                f'<b class="pin boat {boat["kind"]}"'
+                f' data-names="{html.escape(boat["kind"])}"'
+                f' style="left:{left:.4f}%;top:{top:.4f}%">\u26f5</b>')
+        marks += '<div class="pins">' + "".join(out) + "</div>"
     world_corpses = WORLD_CORPSES.get(pick["label"], [])
     if world_corpses:
         span = fch.MAP_SPAN
@@ -2777,11 +2799,11 @@ def render_map(requested, shared=None, seeds=None, fog=True):
             who = body["name"] or "somebody"
             # Inside a cave is a different errand from out in the open, and
             # the height is the only thing that says which.
-            where = " indoors" if body["indoors"] else ""
+            indoors = " indoors" if body["indoors"] else ""
             says = who + (" \u2014 inside a cave or crypt here"
                           if body["indoors"] else "")
             out.append(
-                f'<b class="pin corpse{where}" data-names="{html.escape(says)}"'
+                f'<b class="pin corpse{indoors}" data-names="{html.escape(says)}"'
                 f' style="left:{left:.4f}%;top:{top:.4f}%">\u2020</b>')
         marks += '<div class="pins">' + "".join(out) + "</div>"
     # Only when an admin has turned it on, and then only the ores this world
@@ -2805,6 +2827,8 @@ def render_map(requested, shared=None, seeds=None, fog=True):
         if by_kind.get(kind):
             rows.append((kind, PIN_GLYPHS.get(kind, "\u25cf"), what,
                          by_kind[kind], True))
+    if world_boats:
+        rows.append(("boat", "\u26f5", "boats", len(world_boats), True))
     if world_corpses:
         rows.append(("corpse", "\u2020", "corpses", len(world_corpses), True))
     for ore in world_ores:
@@ -2914,6 +2938,7 @@ MAP_PAGE = """<!doctype html>
  .maplegend .key.portals{color:#c9a3ff}
  .maplegend .key.built{color:#f0b060}
  .maplegend .key.corpse{color:#ff8080}
+ .maplegend .key.boat{color:#7fd4c8}
  .maplegend .key.silver{color:#2aa8c8}
  .maplegend .key.copper{color:#d6844e}
  .maplegend .key.tin{color:#9298b4}
@@ -2923,6 +2948,7 @@ MAP_PAGE = """<!doctype html>
  .ore{image-rendering:pixelated}
  /* What the boxes actually do. Hiding is a class on the plate, so a
     change is one attribute and nothing is redrawn or refetched. */
+ .plate.off-boat .pin.boat,
  .plate.off-corpse .pin.corpse,
  .plate.off-portals #portals,
  .plate.off-built .built,
@@ -2964,6 +2990,9 @@ MAP_PAGE = """<!doctype html>
  /* How many are in the huddle. Hovering it names them. */
  .pin.portal em{font-style:normal;font-size:9px;font-weight:700;
    vertical-align:super;margin-left:1px;color:#f0e4ff}
+ .pin.boat{color:#7fd4c8;font-size:13px}
+ /* The one worth spotting from across the map. */
+ .pin.boat.longship,.pin.boat.drakkar{color:#ffd98a;font-size:16px}
  .pin.corpse{color:#ff8080;font-size:15px;font-weight:700}
  /* Still in the cave, not on the hillside above it. */
  .pin.corpse.indoors{color:#c86868}
@@ -2996,8 +3025,8 @@ MAP_PAGE = """<!doctype html>
   padding:.9rem 1rem;color:var(--muted)}
 </style></head><body>
 <h1>The map</h1>
-<p class="muted">Everyone's fog of war, added together &middot;
- <a href="/">back to the dashboard</a> &middot; <a href="/me">add yours</a></p>
+<p class="muted">Everywhere the group has been, from its own cartography
+ table &middot; <a href="/">back to the dashboard</a></p>
 <nav class="tabs">__TABS__</nav>
 __BODY__
 <p class="muted" style="font-size:.85rem">A world&rsquo;s map comes from its own
