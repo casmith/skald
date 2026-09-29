@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.21.0
+
+- The explored figure counts the world, not the picture. The map is drawn
+  square but Valheim's world is a disc ending 10,500 metres out, and the
+  corners are somewhere nobody can sail to — so every figure was about 1.7
+  times smaller than the truth. A world reading 3.84% was really at 6.44%.
+
 ## 0.20.2
 
 - Fixed: clicking a portal stopped drawing the line to its other end. The
