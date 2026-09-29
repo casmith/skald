@@ -926,6 +926,79 @@ def ore_png(points, edge, colour, span=None):
             + chunk(b"IEND", b""))
 
 
+# A player's corpse. It exists only until somebody loots it, so what this
+# finds is the stuff still lying out there.
+CORPSE_PREFAB = "Player_tombstone"
+OWNER_NAME_KEY = 1227488406      # GetStableHashCode("ownerName")
+
+# Valheim builds the inside of a cave or crypt in its own space high above
+# the world, directly over the entrance -- so a corpse in one has the x and
+# z of the place you would walk in, and a y of about five thousand. That
+# makes it mappable, and the height is worth keeping: "in the cave here" is
+# a different errand from "on the ground here".
+INDOORS_ABOVE = 1000.0
+
+
+def _corpses_in(path):
+    """The corpses in one chunk: [{name, x, z, indoors}]."""
+    try:
+        with open(path, "rb") as f:
+            blob = f.read()
+    except OSError:
+        return []
+    needle = struct.pack("<i", stable_hash(CORPSE_PREFAB))
+    key = struct.pack("<i", OWNER_NAME_KEY)
+    out, at = [], blob.find(needle)
+    while at != -1:
+        if at >= PORTAL_POS_BACK:
+            x, y, z = struct.unpack_from("<3f", blob, at - PORTAL_POS_BACK)
+            if (-MAP_SPAN < x < MAP_SPAN and -MAP_SPAN < z < MAP_SPAN
+                    and -1000.0 < y < 8000.0):
+                name = ""
+                k = blob.find(key, at, min(len(blob), at + 400))
+                if k != -1:
+                    r = Reader(blob)
+                    r.i = k + 4
+                    try:
+                        text = r.string()
+                        if len(text) <= 60 and text.isprintable():
+                            name = text
+                    except (Bad, struct.error, UnicodeDecodeError):
+                        name = ""
+                out.append({"name": name, "x": x, "z": z,
+                            "indoors": y > INDOORS_ABOVE})
+        at = blob.find(needle, at + 4)
+    return out
+
+
+def world_corpses(directory, cache=None):
+    """Every corpse still lying in a world, with whose it is."""
+    out = []
+    try:
+        names = sorted(os.listdir(directory))
+    except OSError:
+        return out
+    for name in names:
+        path = os.path.join(directory, name)
+        try:
+            st = os.stat(path)
+        except OSError:
+            continue
+        if not os.path.isfile(path):
+            continue
+        key = (path, st.st_size, st.st_mtime)
+        if cache is not None and key in cache:
+            found = cache[key]
+        else:
+            found = _corpses_in(path)
+            if cache is not None:
+                cache[key] = found
+        out.extend(found)
+    if cache is not None and len(cache) > 400:
+        cache.clear()
+    return out
+
+
 def world_meta(fwl):
     """A world's name, seed and id, from its .fwl.
 
