@@ -25,7 +25,8 @@ def _piece(name, x, z, creator=True, y=30.0):
 
 
 def _prefabs():
-    return [struct.pack("<i", stable_hash(n)) for n in fch.BUILD_PIECES]
+    return {struct.pack("<i", stable_hash(n)): n in fch.LIGHT_PIECES
+            for n in fch.BUILD_PIECES}
 
 
 def test_only_what_somebody_built_is_counted(tmp_path):
@@ -35,7 +36,7 @@ def test_only_what_somebody_built_is_counted(tmp_path):
         + _piece("stone_wall_2x1", -4000.0, 3000.0, creator=False)
         + _piece("wood_beam", 104.0, 202.0))
     got = fch._construction_in(str(path), _prefabs())
-    assert [(round(x), round(z)) for x, z in got] == [(100, 200), (104, 202)]
+    assert [(round(x), round(z)) for x, z, _ in got] == [(100, 200), (104, 202)]
 
 
 def test_a_world_of_ruins_reads_as_empty(tmp_path):
@@ -58,7 +59,7 @@ def test_one_bad_point_does_not_lose_the_rest(tmp_path):
     path = tmp_path / "c.chunk"
     path.write_bytes(bytes(body))
     got = fch._construction_in(str(path), _prefabs())
-    assert [(round(x), round(z)) for x, z in got] == [(50, 60), (70, 80)]
+    assert [(round(x), round(z)) for x, z, _ in got] == [(50, 60), (70, 80)]
 
 
 def test_a_creator_far_away_belongs_to_nothing(tmp_path):
