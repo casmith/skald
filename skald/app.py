@@ -112,6 +112,8 @@ BACKUPS_ROOT = CONFIG.backups_root
 SAVES_ROOT = CONFIG.saves_root
 SAVE_SCAN_SECONDS = CONFIG.save_scan_seconds
 BACKUP_SCAN_EVERY = 10  # save scans, i.e. every 10 minutes
+BACKUPS_PER_SCAN = 6    # a new world catches up over a few passes
+MAX_SAVE_BODY = 256 << 20   # a sane ceiling on a save's key section
 # A boss summoned this long before its kill counts as that fight's start.
 FIGHT_MAX_SECONDS = 3600
 # Log timestamps are to the second and file times can land a moment either
@@ -729,13 +731,28 @@ def db2_world(b):
 
 
 def backup_global_keys(path, world):
-    """The milestone keys in one backup's saved world."""
+    """The milestone keys in one backup's saved world.
+
+    Only the head of the save is read. A `.db2` begins with a version, the
+    world clock and the length of the gzip body that holds the keys, and
+    everything after that is of no interest here -- so the member is
+    streamed and stopped rather than pulled out whole. On a mature world
+    that is the difference between a few hundred kilobytes and tens of
+    megabytes, per backup, off the NAS.
+    """
     with zipfile.ZipFile(path) as z:
         dbs = [n for n in z.namelist()
                if f"worlds_local/{world}/" in n and n.endswith(".db2")]
         if not dbs:
             return set()
-        return db2_world(z.read(dbs[0]))[0]
+        with z.open(dbs[0]) as f:
+            head = f.read(16)
+            if len(head) < 16:
+                return set()
+            _version, _clock, ln = struct.unpack_from("<idi", head, 0)
+            if not 0 < ln <= MAX_SAVE_BODY:
+                raise ValueError(f"implausible save body length {ln}")
+            return db2_world(head + f.read(ln))[0]
 
 
 def load_milestones():
@@ -754,11 +771,19 @@ def scan_backups():
         st = state.get(world) or {"last": "", "last_ts": None, "milestones": {}}
         known = set(st["milestones"])
         pattern = os.path.join(CONFIG.backups_dir(world), "worlds-*.zip")
+        # A world Skald has not seen before has every backup it has ever
+        # taken waiting for it, and reading them back to back off the NAS
+        # is enough to stall the machine the game is running on. Take a few
+        # each pass and catch up over the next several minutes instead.
+        budget = BACKUPS_PER_SCAN
         for path in sorted(glob.glob(pattern)):
             name = os.path.basename(path)
             m = BACKUP_NAME_RE.search(name)
             if not m or name <= (st["last"] or ""):
                 continue
+            if budget <= 0:
+                break
+            budget -= 1
             try:
                 keys = backup_global_keys(path, world)
             except Exception as e:

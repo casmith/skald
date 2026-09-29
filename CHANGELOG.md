@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.20.1
+
+- A world Skald has not seen before no longer reads its entire backup
+  history in one pass. Every backup is new to it, and reading them back to
+  back off a NAS is enough to starve the machine the game servers run on.
+  Six per scan now, catching up over the following minutes.
+- Only the head of a backup's save is read. The milestone keys sit in the
+  first few hundred bytes and the rest is chunk data, so a mature world's
+  save no longer comes across the network in full — tens of megabytes per
+  backup, for nothing.
+- Fixed: the cartography cache emptied itself on every file, so only the
+  last one stayed cached and every pass re-read and re-decompressed the
+  whole world.
+
 ## 0.20.0
 
 - The map shows the world's day, time and whether it is dawn, day, dusk or
