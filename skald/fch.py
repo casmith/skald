@@ -386,6 +386,9 @@ def world_uid(fwl):
 # zeroes, which deflates to almost nothing, and skipping small files would
 # skip exactly the worlds whose map has only just started.
 WORLD_MAP_MIN = 256
+# Enough for every file of a world or two; past that the saves have
+# rolled over and the old keys are dead weight.
+MAX_CACHED_SAVES = 400
 # How far past the grid to look for the pin count. The run of
 # 0/1 bytes can reach into the count itself, which starts small.
 _PIN_SEARCH = 8
@@ -425,7 +428,12 @@ def world_map(directory, cache=None):
         else:
             found = _world_map_in(path)
             if cache is not None:
-                cache.clear()          # one world, one map: do not grow
+                # Keyed on path, size and mtime, so a save that has not moved
+                # is not decompressed again. Clearing it here instead -- which
+                # is what this did -- left only the last file cached, so every
+                # pass re-read the whole world.
+                if len(cache) > MAX_CACHED_SAVES:
+                    cache.clear()
                 cache[key] = found
         if found and (best is None or found["seen"] > best["seen"]):
             best = dict(found, path=path, mtime=st.st_mtime)
