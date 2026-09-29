@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.20.0
+
+- **What time it is in the world**, on the map: the day, the clock and
+  whether it is dawn, day, dusk or night. The world's clock only runs while
+  somebody is online, so this is the world's own day rather than how long
+  ago it was made — which is the number that matters when you are deciding
+  whether to sail somewhere before dark.
+- **The map link on the dashboard goes to the world you were reading.** It
+  used to land on whichever world the map listed first, so looking at one
+  world's dashboard and clicking through took you to another.
+- A world nobody has played yet has no clock, and says nothing rather than
+  inventing one.
+
 ## 0.19.0
 
 - **Boats on the map**, by kind — raft, karve, longship, drakkar — because a

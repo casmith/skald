@@ -2236,7 +2236,7 @@ PAGE = """<!doctype html>
  <a href="/api/online__Q__">online</a> &middot; <a href="/api/playtime__Q__">playtime</a> &middot;
  <a href="/api/daily__Q__">daily</a> JSON &middot; <a href="/diagnostics">diagnostics</a></div>
 __WHO__
-<p class="gomap"><a href="/map">The group map</a><span>terrain, where everyone has
+<p class="gomap"><a href="/map__Q__">The group map</a><span>terrain, where everyone has
  been, the pins, the portals and everything built</span></p>
 <nav class="tabs" aria-label="Worlds">__TABS__</nav>
 __CARD__
@@ -2653,7 +2653,8 @@ __NOTIFY__
 </body></html>"""
 
 
-def render_map(requested, shared=None, seeds=None, fog=True):
+def render_map(requested, shared=None, seeds=None, fog=True,
+               clocks=None):
     """The group's map.
 
     Two sources, and the first is far the better one. A world's own save
@@ -2693,6 +2694,17 @@ def render_map(requested, shared=None, seeds=None, fog=True):
     share = seen / (edge ** 2) * 100 if edge else 0
     label = html.escape(pick["label"])
     meta = seeds.get(pick["label"])
+    # What time it is in there. The world's clock only runs while somebody is
+    # online, so this is the world's own day rather than how long ago it was
+    # made -- which is the number that means anything when you are deciding
+    # whether to sail somewhere now.
+    when = ""
+    clock = (clocks or {}).get(pick["label"])
+    if clock is not None:
+        day, hhmm = weather.day_and_clock(clock)
+        phase = weather.phase_at(clock)[0]
+        when = (f' &middot; day <b>{day}</b>, {hhmm} '
+                f'<span class="phase {phase}">{phase}</span>')
     seed_line = terrain = ""
     if meta:
         seed_line = (f' &middot; seed <b>{html.escape(meta["seed_name"])}</b>'
@@ -2852,7 +2864,7 @@ def render_map(requested, shared=None, seeds=None, fog=True):
               if pick.get("fog", True) and terrain else "")
     note = (" &middot; terrain drawn from the world seed; the lit part is what "
             "the group has explored" if terrain else "")
-    body = (f'<p class="facts"><b>{label}</b> &middot; {share:.2f}% of the map '
+    body = (f'<p class="facts"><b>{label}</b>{when} &middot; {share:.2f}% of the map '
             f'seen &middot; {where}{seed_line}</p>'
             f'<div class="viewer" id="viewer"><div class="plate{off_at_first}" id="plate">'
             + terrain
@@ -2939,6 +2951,13 @@ MAP_PAGE = """<!doctype html>
  .maplegend .key.built{color:#f0b060}
  .maplegend .key.corpse{color:#ff8080}
  .maplegend .key.boat{color:#7fd4c8}
+ /* What time it is in there. Night reads cold, midday warm, so the colour
+    says it before the word does. */
+ .phase{font-style:normal;padding:0 .3em;border-radius:3px;font-size:.85em}
+ .phase.dawn{color:#ffc98a}
+ .phase.day{color:#ffe9a8}
+ .phase.dusk{color:#d9a0ff}
+ .phase.night{color:#9fb8e8}
  .maplegend .key.silver{color:#2aa8c8}
  .maplegend .key.copper{color:#d6844e}
  .maplegend .key.tin{color:#9298b4}
@@ -3567,12 +3586,15 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             return self.wfile.write(body)
         if path == "/map":
+            h = history()
+            now = time.time()
             return self._send(200, render_map(params.get("world", [""])[0],
                                               dict(WORLD_MAPS),
                                               {w: world_metadata(w)
                                                for w in sorted(SERVERS)},
                                               params.get("fog", ["1"])[0] != "0",
-                                              ),
+                                              {w: world_clock(h, w, now)
+                                               for w in sorted(SERVERS)}),
                               "text/html; charset=utf-8")
 
         now = time.time()
