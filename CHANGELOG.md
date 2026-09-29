@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.18.0
+
+- **Corpses on the map**, with whose they are. A tombstone lasts until
+  somebody loots it, so these are the ones still lying out there waiting to
+  be fetched.
+- **Including the ones in caves**, which are the ones you most want.
+  Valheim builds the inside of a cave or crypt in its own space five
+  thousand metres up, so a corpse in one looks at first like a bad read —
+  but the interior sits directly over its own entrance, so the x and z are
+  exactly the ground you walk to. Confirmed on two worlds by finding
+  objects at both heights over the same spot.
+- A corpse indoors is drawn differently and says so, because "in the cave
+  here" is a different errand from "on the hillside here".
+
 ## 0.17.0
 
 - **Where the ore still is**, as four more map layers: silver, copper, tin
