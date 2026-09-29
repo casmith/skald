@@ -5,3 +5,7 @@ __pycache__/
 *.egg-info/
 dist/
 .venv/
+
+# Screenshots dropped in for reference. Real worlds, real names: this
+# repository should never need a real player's name in it.
+screenshot-*.png

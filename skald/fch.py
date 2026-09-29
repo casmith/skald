@@ -999,6 +999,70 @@ def world_corpses(directory, cache=None):
     return out
 
 
+# Boats, by what the save calls them. They are worth finding because they
+# move: a longship is wherever somebody last left it, which is not
+# necessarily where you moored it.
+BOATS = {
+    "Raft": "raft",
+    "Karve": "karve",
+    "VikingShip": "longship",
+    "CargoShip": "drakkar",
+}
+
+
+def _boats_in(path, pats):
+    """The boats in one chunk: [{kind, x, z}]."""
+    try:
+        with open(path, "rb") as f:
+            blob = f.read()
+    except OSError:
+        return []
+    out = []
+    for needle, kind in pats.items():
+        at = blob.find(needle)
+        while at != -1:
+            if at >= PORTAL_POS_BACK:
+                x, y, z = struct.unpack_from("<3f", blob, at - PORTAL_POS_BACK)
+                # A boat sits on the water, and the water is at thirty. One
+                # well off it is not a boat, it is four bytes that happened
+                # to match.
+                if (-MAP_SPAN < x < MAP_SPAN and -MAP_SPAN < z < MAP_SPAN
+                        and 0.0 < y < 200.0):
+                    out.append({"kind": kind, "x": x, "z": z})
+            at = blob.find(needle, at + 4)
+    return out
+
+
+def world_boats(directory, cache=None):
+    """Every boat in a world, and what kind each is."""
+    pats = {struct.pack("<i", stable_hash(prefab)): kind
+            for prefab, kind in BOATS.items()}
+    out = []
+    try:
+        names = sorted(os.listdir(directory))
+    except OSError:
+        return out
+    for name in names:
+        path = os.path.join(directory, name)
+        try:
+            st = os.stat(path)
+        except OSError:
+            continue
+        if not os.path.isfile(path):
+            continue
+        key = (path, st.st_size, st.st_mtime)
+        if cache is not None and key in cache:
+            found = cache[key]
+        else:
+            found = _boats_in(path, pats)
+            if cache is not None:
+                cache[key] = found
+        out.extend(found)
+    if cache is not None and len(cache) > 400:
+        cache.clear()
+    return out
+
+
 def world_meta(fwl):
     """A world's name, seed and id, from its .fwl.
 

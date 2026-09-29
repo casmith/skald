@@ -43,6 +43,7 @@ backups_dir = "/mnt/backups/utgard"
 | `base_url` | `SKALD_BASE_URL` | — | The public address people reach Skald at. Setting it turns on sign-in |
 | `steam_api_key` | `SKALD_STEAM_API_KEY` | — | Optional: a free Steam Web API key, for display names and avatars |
 | `session_days` | `SKALD_SESSION_DAYS` | `30` | How long a sign-in lasts |
+| `show_ores` | `SKALD_SHOW_ORES` | off | Show where the ore still is. See below |
 
 A world's `saves_dir` and `backups_dir` override the roots for that world
 alone.
@@ -79,19 +80,6 @@ in as anyone.
 
 Nothing about the dashboard changes for people who do not sign in.
 
-### Your map
-
-Character files are wherever Valheim keeps yours:
-
-| | |
-|---|---|
-| Windows | `%USERPROFILE%\\AppData\\LocalLow\\IronGate\\Valheim\\characters` |
-| Linux | `~/.config/unity3d/IronGate/Valheim/characters` |
-| Steam Cloud, either | `…/Steam/userdata/<id>/892970/remote/characters` |
-
-If the game saves to the cloud, the last one is the live copy and the others
-may be years stale — worth checking the dates.
-
 ### Your page
 
 `/me` is the one page that is yours. It shows your playtime over the usual
@@ -123,6 +111,21 @@ means having the Steam account that played it.
 What you own is **private**. Characters and Steam IDs never appear on the
 dashboard, in the API, or to anyone else — the only thing sign-in changes on
 the public page is that *you* are greeted by your character's name.
+
+## Where the ore still is
+
+`SKALD_SHOW_ORES=1` adds four map layers: silver, copper, tin and obsidian,
+read from the same saves as everything else. What they show is what is left
+— a deposit mined out is gone from the save, and so from the map.
+
+It is off unless you set it, and the reason is not technical. Silver is
+buried and meant to be hunted with a wishbone; drawing every vein retires
+that. Whether your server wants it is a decision about your game, so Skald
+will not make it for you. Even switched on the layers start unticked.
+
+A vein is mined in pieces, so a marker means there is something left rather
+than that nobody has touched it, and the map only moves when the world
+saves.
 
 ## Where a setting came from
 
