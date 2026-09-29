@@ -11,9 +11,8 @@ import zlib
 import pytest
 
 from tests import mkfch
-from tests.conftest import ALFR, STEAM
 
-from skald import app, fch, store
+from skald import fch
 
 T = 1_800_000_000
 UID = 8_675_309
@@ -144,44 +143,6 @@ def test_the_png_says_what_was_explored():
 
 # --- storage -----------------------------------------------------------
 
-def test_a_map_is_stored_and_merged(tracker):
-    store.put_user(app.db(), STEAM[ALFR], {"display_name": "a"}, T)
-    store.put_user(app.db(), STEAM["Bera"], {"display_name": "b"}, T)
-    a = fch.pack([1, 1, 0, 0, 0, 0, 0, 0])
-    b = fch.pack([0, 0, 1, 1, 0, 0, 0, 0])
-    store.put_map(app.db(), STEAM[ALFR], UID, 8, zlib.compress(a), [], 2, T)
-    store.put_map(app.db(), STEAM["Bera"], UID, 8, zlib.compress(b), [], 2, T)
-    merged = app.merged_map(UID)
-    assert merged["people"] == 2 and merged["seen"] == 4
-    assert fch.unpack(merged["bits"], 8) == bytes([1, 1, 1, 1, 0, 0, 0, 0])
-
-
-def test_uploading_again_replaces_rather_than_doubles(tracker):
-    store.put_user(app.db(), STEAM[ALFR], {"display_name": "a"}, T)
-    for seen in (2, 5):
-        store.put_map(app.db(), STEAM[ALFR], UID, 8,
-                      zlib.compress(fch.pack([1] * seen + [0] * (8 - seen))),
-                      [], seen, T)
-    rows = store.maps_for(app.db(), UID)
-    assert len(rows) == 1 and rows[0]["seen"] == 5
-
-
-def test_removing_your_map_removes_only_yours(tracker):
-    store.put_user(app.db(), STEAM[ALFR], {"display_name": "a"}, T)
-    store.put_user(app.db(), STEAM["Bera"], {"display_name": "b"}, T)
-    for who in (STEAM[ALFR], STEAM["Bera"]):
-        store.put_map(app.db(), who, UID, 8, zlib.compress(fch.pack([1] * 8)), [], 8, T)
-    store.drop_map(app.db(), STEAM[ALFR], UID)
-    assert [r["steam_id"] for r in store.maps_for(app.db(), UID)] == [STEAM["Bera"]]
-
-
-# --- shapes taken from real character files ------------------------------
-#
-# The parser was first written from a published description of version 33
-# and refused every real file, which are version 46. These encode what an
-# actual file turned out to look like, so that particular mistake cannot be
-# made twice. No real file is in this repository; the shapes are.
-
 def test_the_layout_a_real_file_uses():
     """Version 46: the map is a length-prefixed byte array."""
     blob = mkfch.character([world(uid=5097231993, edge=64)])
@@ -222,3 +183,31 @@ def test_a_character_who_has_been_nowhere_is_not_an_error():
     thing this was tried on."""
     blob = mkfch.character([{"uid": 7}, {"uid": 8}])
     assert fch.parse(blob) == {"version": 46, "worlds": []}
+
+
+def test_the_dashboard_points_at_the_map():
+    """It was reachable only from your own page, which is a strange place to
+    hide the thing everyone shares."""
+    from skald.app import PAGE
+    assert 'href="/map"' in PAGE
+
+
+def test_nothing_offers_to_take_a_character_file_any_more():
+    """The cartography table gives a better map than an upload ever did, from
+    a save Skald already reads. Every way in is gone, not just the button."""
+    from skald import app, store
+    assert "/me/map" not in app.ME_PAGE
+    assert "enctype=\"multipart/form-data\"" not in app.ME_PAGE
+    for gone in ("put_map", "maps_for", "my_maps", "drop_map", "mapped_worlds"):
+        assert not hasattr(store, gone), gone
+    assert not hasattr(app, "merged_map")
+    assert not hasattr(app, "render_my_maps")
+
+
+def test_the_schema_still_has_every_step_it_ever_had():
+    """The upload's table stays. Steps are applied by position, so removing
+    one renumbers the rest and every existing database would try to apply
+    somebody else's migration."""
+    from skald import store
+    assert len(store.SCHEMA) == 7
+    assert "CREATE TABLE maps" in store.SCHEMA[6]

@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.16.0
+
+- **The map is linked from the dashboard.** It was reachable only from your
+  own page, which is a strange place to keep the thing everyone shares. It
+  stays a page of its own rather than a panel on the dashboard, because the
+  dashboard reloads itself every minute and that would throw away wherever
+  you had panned and zoomed to.
+- **Uploading a character file is gone.** A world's cartography table gives a
+  better map than an upload ever did — everyone who used one, kept current by
+  the game, needing nothing from anybody — so the upload had nothing left to
+  add. The form, both endpoints and all the storage behind it are removed.
+- The table it wrote to stays in the schema. Steps are applied by position,
+  so removing one renumbers every step after it and existing databases would
+  start applying somebody else's migration. Nothing writes there now.
+
 ## 0.15.0
 
 - **Tap a portal and see where it goes.** A line is drawn to the other end,
