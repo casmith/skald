@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.20.2
+
+- Fixed: clicking a portal stopped drawing the line to its other end. The
+  corpse and boat layers are drawn above the portals and each covers the
+  whole map, so they took the click before it reached the marker. Only the
+  markers take clicks now; the layers they sit in do not.
+
 ## 0.20.1
 
 - A world Skald has not seen before no longer reads its entire backup

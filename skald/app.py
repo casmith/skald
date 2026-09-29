@@ -2950,7 +2950,7 @@ MAP_PAGE = """<!doctype html>
  .plate{position:absolute;inset:0;transform-origin:0 0}
  /* Shown in place of the terrain while it is being worked out. It sits
     where the picture will be, so the page does not jump when it arrives. */
- .drawing{position:absolute;inset:0;display:flex;flex-direction:column;
+ .drawing{position:absolute;inset:0;pointer-events:none;display:flex;flex-direction:column;
    align-items:center;justify-content:center;gap:.6em;padding:2em;
    text-align:center;color:#d8cba8;background:#241f1a}
  .drawing b{font-size:1.1em;color:#f3e6c8}
@@ -3008,7 +3008,11 @@ MAP_PAGE = """<!doctype html>
    overflow:visible}
  .links line{stroke:#c9a3ff;stroke-width:1.5;stroke-opacity:.85;
    stroke-dasharray:4 3;vector-effect:non-scaling-stroke}
- .pins{position:absolute;inset:0}
+ /* Each layer is a full-plate box stacked on the last, so a box that
+    takes clicks hides every layer under it -- which is what stopped a
+    portal responding once corpses and boats were added above it. The
+    markers take the clicks; their containers must not. */
+ .pins{position:absolute;inset:0;pointer-events:none}
  /* Each pin sits at its own place on the plate, so the zoom carries it.
     The glyph is pulled back to its own centre and kept at one size however
     far in you are, because a marker that grows with the map stops being a
