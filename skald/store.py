@@ -135,7 +135,11 @@ SCHEMA = [
         last_sent  REAL
     );
     """,
-    # v7: uploaded maps. One row per player per world: their fog of war,
+    # v7: uploaded maps, from when a character file was the only way to
+    # get one. The cartography table replaced that and the upload is
+    # gone, but the step stays: the schema is applied by position, so
+    # removing one renumbers every step after it. Nothing writes here.
+    # One row per player per world: their fog of war,
     # packed to a bit a pixel and deflated, and their pins. Nothing else
     # from the character file is here, because nothing else is ever parsed.
     """
@@ -476,42 +480,6 @@ def delivery_failed(conn, steam_id, error, give_up_at=10):
             "UPDATE subscriptions SET failures = failures + 1, last_error = ?,"
             " enabled = CASE WHEN failures + 1 >= ? THEN 0 ELSE enabled END"
             " WHERE steam_id = ?", (str(error)[:200], give_up_at, steam_id))
-
-
-def put_map(conn, steam_id, world_uid, edge, explored, pins, seen, when):
-    with conn:
-        conn.execute(
-            "INSERT INTO maps (steam_id, world_uid, edge, explored, pins, seen,"
-            " uploaded) VALUES (?, ?, ?, ?, ?, ?, ?)"
-            " ON CONFLICT(steam_id, world_uid) DO UPDATE SET edge = ?,"
-            " explored = ?, pins = ?, seen = ?, uploaded = ?",
-            (steam_id, world_uid, edge, explored, json.dumps(pins), seen, when,
-             edge, explored, json.dumps(pins), seen, when))
-
-
-def maps_for(conn, world_uid):
-    """Everyone's map of one world."""
-    return [dict(r) for r in conn.execute(
-        "SELECT * FROM maps WHERE world_uid = ? ORDER BY uploaded", (world_uid,))]
-
-
-def my_maps(conn, steam_id):
-    return [dict(r) for r in conn.execute(
-        "SELECT world_uid, edge, seen, uploaded FROM maps WHERE steam_id = ?"
-        " ORDER BY uploaded DESC", (steam_id,))]
-
-
-def drop_map(conn, steam_id, world_uid):
-    with conn:
-        conn.execute("DELETE FROM maps WHERE steam_id = ? AND world_uid = ?",
-                     (steam_id, world_uid))
-
-
-def mapped_worlds(conn):
-    """World uids anyone has uploaded, with how many people have."""
-    return [dict(r) for r in conn.execute(
-        "SELECT world_uid, count(*) AS people, max(edge) AS edge,"
-        " max(uploaded) AS newest FROM maps GROUP BY world_uid")]
 
 
 def meta(conn, key):
