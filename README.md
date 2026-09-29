@@ -8,10 +8,9 @@ It reads what the server already writes — its log and its world saves — and
 serves a single page. No mods, no plugins, nothing installed in the game, and
 nothing written back to your world.
 
-> **v0.6** — the first release worth sharing, and then some. Running daily on the homelab it
-> grew up in, and installed from scratch on a clean machine to make sure the
-> instructions below are true. See the [roadmap](ROADMAP.md) for what is next
-> and the [limitations](docs/limitations.md) for what it cannot do.
+> Running daily on the homelab it grew up in, and installed from scratch on a
+> clean machine to check these instructions. See the [roadmap](ROADMAP.md) for
+> what is next and the [limitations](docs/limitations.md) for what it cannot do.
 
 ![The dashboard: who is online, the weather, and boss kills as
 badges](docs/screenshots/dashboard.png)
@@ -22,13 +21,11 @@ badges](docs/screenshots/dashboard.png)
 ![The map: terrain generated from the world seed, with portals, buildings,
 boats and corpses over it](docs/screenshots/map.png)
 
-Valheim stores no terrain. It rebuilds the world from one number every time
-it loads, which is why a ten-kilometre world fits in a few megabytes — and
-why drawing a map means doing the same arithmetic rather than reading a
-picture. Over that goes everything your cartography table has shared, and
-the things worth finding again: portals and where they lead, whatever
-anybody has built, the boat somebody moved, and the corpse nobody has been
-back for.
+Valheim stores no terrain: it rebuilds the world from one number every time
+it loads. Drawing a map means doing the same arithmetic rather than reading a
+picture. Over that goes what your cartography table has shared, and the
+things worth finding again — portals and where they lead, what people have
+built, boats, and corpses nobody has fetched.
 
 </details>
 
@@ -81,38 +78,31 @@ server](#trying-it-without-a-server).)*
   portals, or the preset the server was started with.
 - **Raids** — what came for you, when, and who was online for it.
 - **Charts** of player-hours, deaths and exploration per day.
-- **Optional sign-in through Steam**, which works out which characters are
-  yours, greets you by the one you play most, gives you a page of your own
-  numbers, and can post to a Discord webhook when someone comes online or a
-  boss falls. Nothing changes for people who do not sign in.
-- **A group map on real terrain** — the world drawn from its own seed, with
-  everything your cartography table has shared laid over it. Nothing is
-  uploaded and nothing leaves the machine; it is read from the save the
-  server is already writing.
-- **Layers on that map**, each a checkbox: the pins your group has placed,
-  split by kind; portals, with the names you gave them and a line to the
-  other end when you tap one; everywhere you have built, drawn as
-  firelight; corpses nobody has fetched yet, including the ones inside
-  caves; and boats, because a longship is wherever somebody last left it.
-- **Where the ore still is** — silver, copper, tin and obsidian — if the
-  person running the server turns it on. Off otherwise, and unticked even
-  then: putting every silver vein on the map does rather retire the
-  wishbone, so it is nobody's decision but theirs.
+- **Optional sign-in through Steam.** It works out which characters are
+  yours, gives you a page of your own numbers, and can post to a Discord
+  webhook when someone comes online or a boss falls. Nothing changes for
+  people who do not sign in.
+- **A group map on real terrain**: the world drawn from its own seed, with
+  your cartography table laid over it. Nothing is uploaded — it is read from
+  the save the server already writes.
+- **Layers on that map**, each a checkbox: pins split by kind, portals with
+  a line to the other end when you tap one, where people have built, corpses
+  nobody has fetched (including the ones in caves), and boats.
+- **Where the ore still is** — silver, copper, tin, obsidian — if the server
+  owner enables it. Off by default: it retires the wishbone, so it is their
+  call rather than Skald's.
 - JSON for all of it, if you would rather build your own view.
 
 ## How it knows
 
-Valheim answers a Steam query with a player *count* and blank names, so the
-names come from the server's own log: a hook copies the handful of lines
-that matter (connections, characters, deaths, landmarks, global keys) into a
-file Skald reads. Boss kills come from the world save, which is also where
-the clock lives — and the weather is *computed* from that clock, because
-Valheim's weather is deterministic.
+Valheim answers a Steam query with a player count and blank names, so the
+names come from the server's own log. Boss kills come from the world save,
+which is also where the clock lives, and the weather is computed from that
+clock: Valheim's weather is deterministic.
 
-[**How it works**](docs/how-it-works.md) explains all of it, including the
-parts that took some finding: why a death looks like a join, why a missed
-goodbye must not merge two sessions, and why the world clock only runs while
-someone is online.
+[**How it works**](docs/how-it-works.md) covers the rest, including why a
+death looks like a join and why the world clock only runs while someone is
+online.
 
 ## Requirements
 
@@ -155,9 +145,9 @@ volume, and each world's `config` volume mounted read-only at
 
 ## Trying it without a server
 
-`tools/demo.py` builds a month of invented history — two worlds, four
-players, sessions, deaths, exploration, a boss falling mid-fight — so you can
-see the thing working before wiring it to a game server:
+`tools/demo.py` builds two invented worlds and a month of history — sessions,
+deaths, a boss falling, a cartography table, portals, boats — so you can see
+Skald working before wiring it to a game server:
 
 ```sh
 python3 tools/demo.py --out /tmp/skald-demo
@@ -166,8 +156,8 @@ SKALD_SAVES_ROOT=/tmp/skald-demo/saves \
 SKALD_WORLDS="Midgard=http://none/status.json" python3 -m skald
 ```
 
-It is also what the screenshots above are made from, which is deliberate:
-this repository should never need a real player's name in it.
+The screenshots above are made from it: this repository should never need a
+real player's name in it.
 
 ## Configuration
 
