@@ -1071,6 +1071,39 @@ def world_boats(directory, cache=None):
     return out
 
 
+# The map texture is square but the world is not. Valheim's ground stops at
+# 10,500 metres from the middle and the rest of the picture is a corner
+# nobody can sail to, so counting it makes every explored figure smaller
+# than the truth -- by a factor of about 1.7, which is the difference
+# between "we have seen 4% of this world" and "we have seen 7%".
+WORLD_EDGE = 10500.0
+
+_EXPLORABLE = {}
+
+
+def explorable_pixels(edge, span=None):
+    """How many pixels of an `edge`-square map are inside the world at all.
+
+    Counted a row at a time rather than a pixel at a time, and kept, since
+    it depends on nothing but the size.
+    """
+    span = MAP_SPAN if span is None else span
+    key = (edge, span)
+    if key in _EXPLORABLE:
+        return _EXPLORABLE[key]
+    step = 2 * span / edge
+    r2 = WORLD_EDGE ** 2
+    total = 0
+    for j in range(edge):
+        y = span - (j + 0.5) * step
+        if abs(y) >= WORLD_EDGE:
+            continue
+        half = math.sqrt(r2 - y * y)
+        total += min(edge, int(2 * half / step))
+    _EXPLORABLE[key] = total
+    return total
+
+
 def world_meta(fwl):
     """A world's name, seed and id, from its .fwl.
 

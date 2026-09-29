@@ -2716,7 +2716,10 @@ def render_map(requested, shared=None, seeds=None, fog=True,
              "anyone has shared to it" if pick["fog"] else
              "nobody has shared a map of this one yet &mdash; build a "
              "cartography table and it appears here")
-    share = seen / (edge ** 2) * 100 if edge else 0
+    # Against the part of the map that exists, not the square it is drawn
+    # in: the corners are past the edge of the world and nobody can go there.
+    reachable = fch.explorable_pixels(edge) if edge else 0
+    share = min(100.0, seen / reachable * 100) if reachable else 0
     label = html.escape(pick["label"])
     meta = seeds.get(pick["label"])
     # What time it is in there. The world's clock only runs while somebody is
