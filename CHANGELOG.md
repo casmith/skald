@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.22.0
+
+- **The map at night.** A second view of the same world with the ground
+  dimmed and the building drawn as lights, the way the dark side of the
+  earth looks from orbit. A settlement of a couple of thousand pieces burns
+  white; a hut on a headland is one faint ember, but it is there.
+- Fires count for more than walls — hearths, torches, forges, kilns and
+  braziers are weighted six to one, since what you would see at night is
+  what is burning.
+- The scale is absolute and logarithmic, so two worlds can be compared and
+  the range from a hut to a capital fits in eight steps.
+
 ## 0.21.0
 
 - The map never appears without its fog, even for a moment. The terrain and

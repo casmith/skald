@@ -1528,16 +1528,17 @@ def draw_terrain(world):
 _BUILT_PNG = {}
 
 
-def built_png(world):
+def built_png(world, night=False):
     """Where people have built in this world, as a transparent overlay."""
     points = WORLD_BUILT.get(world) or []
     if not points:
         return None
-    held = _BUILT_PNG.get(world)
+    key = (world, night)
+    held = _BUILT_PNG.get(key)
     if held and held[0] == len(points):
         return held[1]
-    body = fch.construction_png(points, TERRAIN_SIZE)
-    _BUILT_PNG[world] = (len(points), body)
+    body = fch.construction_png(points, TERRAIN_SIZE, night=night)
+    _BUILT_PNG[key] = (len(points), body)
     return body
 
 
@@ -2679,7 +2680,7 @@ __NOTIFY__
 
 
 def render_map(requested, shared=None, seeds=None, fog=True,
-               clocks=None):
+               clocks=None, night=False):
     """The group's map.
 
     Two sources, and the first is far the better one. A world's own save
@@ -2895,13 +2896,23 @@ def render_map(requested, shared=None, seeds=None, fog=True,
               f'{"hide" if fog else "show"} fog of war</a>'
               if pick.get("fog", True) and terrain and CONFIG.allow_fog_off
               else "")
-    note = (" &middot; terrain drawn from the world seed; the lit part is what "
+    if terrain and world_built:
+        keep = "" if fog else "&fog=0"
+        toggle += (" &middot; " if toggle else "") + (
+            f'<a href="/map?world={pick["key"]}{keep}'
+            f'{"" if night else "&night=1"}">'
+            f'{"leave night" if night else "see it at night"}</a>')
+    note = (" &middot; lit where people have built, brighter where they have "
+            "built more" if night else
+            " &middot; terrain drawn from the world seed; the lit part is what "
             "the group has explored" if terrain else "")
     body = (f'<p class="facts"><b>{label}</b>{when} &middot; {share:.2f}% of the map '
             f'seen &middot; {where}{seed_line}</p>'
-            f'<div class="viewer" id="viewer"><div class="plate{off_at_first}" id="plate">'
+            f'<div class="viewer" id="viewer">'
+            f'<div class="plate{" night" if night else ""}{off_at_first}" id="plate">'
             + terrain
-            + (f'<img class="built" src="/built.png?world={pick["key"]}"'
+            + (f'<img class="built" src="/built.png?world={pick["key"]}'
+               f'{"&night=1" if night else ""}"'
                f' alt="" width="{edge}" height="{edge}">'
                if world_built else "")
             + "".join(
@@ -3073,6 +3084,13 @@ MAP_PAGE = """<!doctype html>
  /* The building sits over the ground and under the fog: people can only
     build where they have been, so it never needs to show through it. */
  .built{image-rendering:auto}
+ /* Seen from orbit at night. The ground is dimmed rather than hidden, so a
+    coastline still places a settlement and only the building burns. The fog
+    stays as it is: there are no lights where nobody has been. */
+ .plate.night .terrain{filter:brightness(.26) saturate(.3) contrast(.95)}
+ .plate.night .ore{opacity:.45}
+ .plate.night .built{filter:brightness(1.3) saturate(1.1)}
+ .plate.night .pin{opacity:.7}
  .plate img{position:absolute;inset:0;width:100%;height:100%;
   image-rendering:pixelated;display:block}
  /* Unexplored ground is not shown at all -- only where the group has been. */
@@ -3615,7 +3633,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.wfile.write(body)
         if path == "/built.png":
             want = params.get("world", [""])[0]
-            body = built_png(want) if want in SERVERS else None
+            body = (built_png(want, night=params.get("night", [""])[0] == "1")
+                    if want in SERVERS else None)
             if not body:
                 return self._send(404, "no building in that world", "text/plain")
             self.send_response(200)
@@ -3648,7 +3667,8 @@ class Handler(BaseHTTPRequestHandler):
                                                for w in sorted(SERVERS)},
                                               params.get("fog", ["1"])[0] != "0",
                                               {w: world_clock(h, w, now)
-                                               for w in sorted(SERVERS)}),
+                                               for w in sorted(SERVERS)},
+                                              params.get("night", [""])[0] == "1"),
                               "text/html; charset=utf-8")
 
         now = time.time()

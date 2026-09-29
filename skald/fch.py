@@ -31,6 +31,7 @@ Layout, for anyone checking this against a file:
         i32   pin count, then per pin: string name, 3 floats, i32 type, u8 crossed
         u8    position shared publicly
 """
+import array
 import bisect
 import math
 import os
@@ -658,6 +659,18 @@ BUILD_PIECES = (
     "piece_sharpstakes", "piece_beehive", "portal_wood",
 )
 
+# The pieces that actually burn. A hall with a hearth, four torches and a
+# forge is a brighter place at night than a hall of the same size with
+# none, so these count for more when the map is drawn as lights.
+LIGHT_PIECES = frozenset((
+    "fire_pit", "hearth", "bonfire", "piece_walltorch", "piece_groundtorch",
+    "piece_groundtorch_wood", "piece_brazierceiling01", "piece_oven",
+    "smelter", "charcoal_kiln", "blastfurnace", "piece_cookingstation",
+    "piece_cookingstation_iron", "windmill", "piece_spinningwheel",
+))
+LIGHT_WEIGHT = 6        # a fire counts for this many walls
+
+
 # A piece someone placed records who placed it. The world's own ruins and
 # dungeons are made of the same prefabs and carry no creator, and there are
 # far more of them -- on one of these worlds, fifty thousand generated
@@ -672,17 +685,21 @@ CREATOR_WINDOW = 250
 
 
 def _construction_in(path, prefabs):
-    """Where somebody built something, in one chunk file. [(x, z)]."""
+    """Where somebody built something, in one chunk. [(x, z, is_light)].
+
+    `prefabs` maps each prefab's packed hash to whether it burns.
+    """
     try:
         with open(path, "rb") as f:
             blob = f.read()
     except OSError:
         return []
-    at, pieces = 0, []
-    for needle in prefabs:
+    lit, pieces = {}, []
+    for needle, burns in prefabs.items():
         at = blob.find(needle)
         while at != -1:
             pieces.append(at)
+            lit[at] = burns
             at = blob.find(needle, at + 4)
     if not pieces:
         return []
@@ -712,13 +729,14 @@ def _construction_in(path, prefabs):
             continue
         if not -1000.0 < y < 2000.0:
             continue
-        out.append((x, z))
+        out.append((x, z, lit.get(start, False)))
     return out
 
 
 def world_construction(directory, cache=None):
     """Everywhere somebody has built something, in one world."""
-    prefabs = [struct.pack("<i", stable_hash(n)) for n in BUILD_PIECES]
+    prefabs = {struct.pack("<i", stable_hash(n)): n in LIGHT_PIECES
+               for n in BUILD_PIECES}
     out = []
     try:
         names = sorted(os.listdir(directory))
@@ -779,18 +797,45 @@ GLOW_ALPHA = (0, 45, 85, 125, 160, 190, 215, 235, 255)
 GLOW_FULL = 120
 
 
-def construction_png(points, edge, span=None):
+# Seen from orbit at night. A city is a white core inside an orange halo;
+# a single hut on a headland is one dim ember, but still there.
+NIGHT_COLOURS = (
+    (0, 0, 0), (58, 26, 10), (96, 44, 14), (140, 68, 20), (184, 100, 30),
+    (216, 140, 52), (238, 182, 96), (250, 218, 156), (255, 244, 214),
+)
+NIGHT_ALPHA = (0, 70, 110, 145, 175, 200, 225, 242, 255)
+# What counts as a city, measured rather than guessed: a settlement of a
+# couple of thousand pieces peaks around here. The scale is absolute so two
+# worlds can be compared, and logarithmic so the range from one hut to a
+# capital fits in eight steps -- a hut lands around the fourth, a hamlet the
+# sixth, a town the seventh, a city white.
+NIGHT_FULL = 8000
+_NIGHT_LOG = math.log1p(NIGHT_FULL)
+
+
+def construction_png(points, edge, span=None, night=False):
     """Where people have built, as a PNG that lies over the map.
 
     Transparent everywhere nobody has built, so it can be laid over the
     terrain the way the explored mask is. Nothing here exaggerates: a
     settlement covers the ground it covers, and on a ten-kilometre world
     that is a small bright place in a lot of dark.
+
+    `night` draws it as lights seen from orbit instead: the same shape, a
+    wider scale so a dense town pulls away from a farmhouse, and a fire
+    worth several walls, since what you would actually see at night is what
+    is burning.
     """
     span = MAP_SPAN if span is None else span
-    light = bytearray(edge * edge)
+    # Wider than a byte on purpose. A city of two thousand pieces and a
+    # hamlet of forty both bury a byte at 255, which is why they came out
+    # the same brightness: the range has to survive the counting before the
+    # palette can show it.
+    light = array.array("I", bytes(4 * edge * edge))
     half = len(_GLOW) // 2
-    for x, z in points:
+    for point in points:
+        x, z = point[0], point[1]
+        weight = LIGHT_WEIGHT if (night and len(point) > 2 and point[2]) else 1
         cx = int((x + span) / (2 * span) * edge)
         cy = int((span - z) / (2 * span) * edge)
         for dy, row in enumerate(_GLOW):
@@ -804,23 +849,34 @@ def construction_png(points, edge, span=None):
                 px = cx + dx - half
                 if 0 <= px < edge:
                     at = base + px
-                    light[at] = min(255, light[at] + w)
+                    light[at] += w * weight
 
-    top = len(GLOW_COLOURS) - 1
+    colours = NIGHT_COLOURS if night else GLOW_COLOURS
+    alphas = NIGHT_ALPHA if night else GLOW_ALPHA
+    full = NIGHT_FULL if night else GLOW_FULL
+    top = len(colours) - 1
     rows = bytearray()
     for y in range(edge):
         rows.append(0)                     # PNG filter: none
         start = y * edge
-        rows += bytes(
-            0 if not v else min(top, 1 + v * (top - 1) // GLOW_FULL)
-            for v in light[start:start + edge])
+        if night:
+            # Logarithmic, so a hut is still a light while a city is white.
+            # Linear, the city is white and everything else is nothing.
+            rows += bytes(
+                0 if not v else
+                min(top, 1 + int((top - 1) * math.log1p(v) / _NIGHT_LOG))
+                for v in light[start:start + edge])
+        else:
+            rows += bytes(
+                0 if not v else min(top, 1 + v * (top - 1) // full)
+                for v in light[start:start + edge])
 
     def chunk(kind, body):
         return (struct.pack(">I", len(body)) + kind + body
                 + struct.pack(">I", zlib.crc32(kind + body) & 0xFFFFFFFF))
 
-    palette = b"".join(bytes(c) for c in GLOW_COLOURS)
-    alpha = bytes(GLOW_ALPHA)
+    palette = b"".join(bytes(c) for c in colours)
+    alpha = bytes(alphas)
     return (b"\x89PNG\r\n\x1a\n"
             + chunk(b"IHDR", struct.pack(">IIBBBBB", edge, edge, 8, 3, 0, 0, 0))
             + chunk(b"PLTE", palette)
