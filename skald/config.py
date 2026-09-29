@@ -34,6 +34,11 @@ DEFAULTS = {
     "base_url": "",
     "steam_api_key": "",
     "session_days": 30,
+    # Where the ore still in the ground is. Off unless an admin turns it on:
+    # silver is buried and meant to be hunted with a wishbone, so putting
+    # every vein on the map retires that, and it is not this program's place
+    # to decide that for somebody's server.
+    "show_ores": False,
 }
 
 # setting -> (canonical variable, older aliases that still work)
@@ -52,6 +57,7 @@ ENV = {
     "base_url": ("SKALD_BASE_URL",),
     "steam_api_key": ("SKALD_STEAM_API_KEY",),
     "session_days": ("SKALD_SESSION_DAYS",),
+    "show_ores": ("SKALD_SHOW_ORES",),
 }
 WORLDS_ENV = ("SKALD_WORLDS", "TRACKER_SERVERS")
 # "World=/path/to/log,Other=/path" for people who would rather not write the
@@ -59,6 +65,11 @@ WORLDS_ENV = ("SKALD_WORLDS", "TRACKER_SERVERS")
 LOGS_ENV = ("SKALD_LOG_FILES",)
 INTS = {"port", "poll_seconds", "save_scan_seconds", "chart_days",
         "merge_gap_seconds", "session_days"}
+BOOLS = {"show_ores"}
+# What counts as yes in the environment. Anything else, including an empty
+# variable, is no -- so setting it to "false" turns it off rather than on,
+# which is what someone writing that plainly meant.
+TRUTHY = {"1", "true", "yes", "on"}
 
 
 @dataclass(frozen=True)
@@ -82,6 +93,7 @@ class Config:
     base_url: str = DEFAULTS["base_url"]
     steam_api_key: str = DEFAULTS["steam_api_key"]
     session_days: int = DEFAULTS["session_days"]
+    show_ores: bool = DEFAULTS["show_ores"]
     timezone: str = DEFAULTS["timezone"]
     default_world: str = DEFAULTS["default_world"]
     events_dir: str = DEFAULTS["events_dir"]
@@ -169,6 +181,9 @@ def load(path=None, env=None):
         sources.setdefault(key, "default")
         if key in INTS:
             values[key] = int(values[key])
+        elif key in BOOLS:
+            v = values[key]
+            values[key] = v if isinstance(v, bool) else str(v).strip().lower() in TRUTHY
 
     worlds = tuple(World(**w) for w in data.get("worlds", []))
     if worlds:
