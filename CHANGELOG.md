@@ -10,6 +10,11 @@
   game adds later falls back to the skull and its tooltip.
 - A pin crossed off in game — how Valheim records the kill — now strikes
   through the name as well, so a beaten boss reads as beaten.
+- **Pinch to zoom on a phone.** The viewer turns off the browser's own touch
+  gestures so it can drive the pan itself, which also turned off pinch-zoom
+  — and zooming was on the wheel, which a phone does not have. The map was
+  stuck at 1x on mobile with no way out. Two fingers now zoom and pan at
+  once, and lifting one carries on panning from the finger still down.
 
 ## 0.22.1
 

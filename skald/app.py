@@ -2959,7 +2959,7 @@ def render_map(requested, shared=None, seeds=None, fog=True,
             + '<p class="facts"><button type="button" data-zoom="-1">&minus;</button> '
             '<button type="button" data-zoom="1">+</button> '
             '<button type="button" data-zoom="0">reset</button>'
-            ' &middot; drag to pan, wheel to zoom'
+            ' &middot; drag to pan, wheel or pinch to zoom'
             + (" &middot; " + toggle if toggle else "") + note + '</p>')
     page = MAP_PAGE.replace("__TABS__", tabs).replace("__BODY__", body)
     if meta and terrain_png(pick["label"]) is None:
@@ -3285,29 +3285,81 @@ __BODY__
      var r = viewer.getBoundingClientRect();
      zoomAbout(e.deltaY < 0 ? 1.25 : 0.8, e.clientX - r.left, e.clientY - r.top);
    }, {passive: false});
+   // Two fingers pinch. The viewer sets touch-action:none, so the browser
+   // will not zoom for us -- and the only other way in was the wheel, which
+   // a phone does not have. That left the map stuck at 1x on mobile.
+   var pointers = new Map();
+   var pinchDist = 0;
+   function pinch() {
+     var r = viewer.getBoundingClientRect(), pts = [];
+     pointers.forEach(function (p) { pts.push(p); });
+     return {x: (pts[0].x + pts[1].x) / 2 - r.left,
+             y: (pts[0].y + pts[1].y) / 2 - r.top,
+             d: Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y)};
+   }
+   function startPinch() {
+     var m = pinch();
+     pinchDist = m.d; lastX = m.x; lastY = m.y;
+     // A pinch is never a tap, however little the fingers travelled.
+     dragging = false; moved = 99;
+   }
    viewer.addEventListener('pointerdown', function (e) {
-     dragging = true; lastX = e.clientX; lastY = e.clientY; moved = 0;
+     pointers.set(e.pointerId, {x: e.clientX, y: e.clientY});
+     if (pointers.size === 2) startPinch();
+     else if (pointers.size === 1) {
+       dragging = true; lastX = e.clientX; lastY = e.clientY; moved = 0;
+     }
      // Stops the browser starting a text selection or an image drag; the
      // stylesheet above cannot prevent the gesture, only the highlight.
      e.preventDefault();
      viewer.setPointerCapture(e.pointerId);
    });
    viewer.addEventListener('pointermove', function (e) {
+     if (pointers.has(e.pointerId)) {
+       pointers.set(e.pointerId, {x: e.clientX, y: e.clientY});
+     }
+     if (pointers.size === 2) {
+       var m = pinch();
+       // Follow the fingers on both counts: pan by however far the pinch
+       // as a whole moved, then zoom about where it now is. Panning first
+       // means a pinch that drifts does not fight the zoom.
+       x += m.x - lastX; y += m.y - lastY;
+       lastX = m.x; lastY = m.y;
+       if (pinchDist > 0) zoomAbout(m.d / pinchDist, m.x, m.y);
+       pinchDist = m.d;
+       // zoomAbout does this too, but returns early once the map is at 1x
+       // or 16x -- and a pinch at either limit must still pan.
+       clamp(); apply(); hideTip();
+       return;
+     }
      if (!dragging) return;
      moved += Math.abs(e.clientX - lastX) + Math.abs(e.clientY - lastY);
      x += e.clientX - lastX; y += e.clientY - lastY;
      lastX = e.clientX; lastY = e.clientY;
      clamp(); apply();
    });
-   viewer.addEventListener('pointerup', function (e) {
+   function lifted(e) {
+     pointers.delete(e.pointerId);
+     if (pointers.size === 2) return startPinch();
+     if (pointers.size === 1) {
+       // One finger left of a pinch. Carry on panning from where that one
+       // is, rather than from the corner it last moved on its own.
+       var rest = pointers.values().next().value;
+       dragging = true; lastX = rest.x; lastY = rest.y; moved = 99;
+       return;
+     }
      dragging = false;
      // A tap, not a drag. The pointer is captured by the viewer while the
      // map is being moved, so the marker never sees the event itself and a
      // title attribute would never fire -- and on a phone it would never
      // fire anyway, there being no hover. So find what was under the
      // finger and say so properly.
+     // moved is all the guard a pinch needs: starting one sets it past the
+     // threshold, so the last finger up of a pinch never reads as a tap.
      if (moved < 8) tapped(e.clientX, e.clientY);
-   });
+   }
+   viewer.addEventListener('pointerup', lifted);
+   viewer.addEventListener('pointercancel', lifted);
    function tapped(cx, cy) {
      var el = document.elementFromPoint(cx, cy);
      while (el && el !== plate && !(el.dataset && el.dataset.names)) {
