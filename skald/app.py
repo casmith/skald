@@ -1594,6 +1594,23 @@ BOSS_NAMES = {
     "$enemy_fader": "Fader",
 }
 
+# Each boss's own mark on the map. Seven identical skulls told you an altar
+# was there but never which one, and which one is the whole question on a
+# map you are reading to decide where to go next.
+#
+# Keyed by the name rather than by the token, so these line up with BOSSES
+# -- the badge row, which is the other place the same seven are listed.
+# test_boss_pins holds the three lists to each other.
+BOSS_GLYPHS = {
+    "Eikthyr": "\u26a1",        # the lightning stag
+    "The Elder": "\u2663",      # a tree with legs
+    "Bonemass": "\u2620",       # keeps the skull all seven used to share
+    "Moder": "\u2744",          # the mountain's own
+    "Yagluth": "\u2604",        # calls down meteors
+    "The Queen": "\u265b",
+    "Fader": "\u2668",          # ash and heat
+}
+
 
 # The legend's rows, in the order they read best: the things people put
 # somewhere on purpose first, the scenery after.
@@ -2773,9 +2790,17 @@ def render_map(requested, shared=None, seeds=None, fog=True,
             # point -- and an empty tooltip is worse than none.
             name = pin_label(pin["name"])
             title = f' title="{html.escape(name)}"' if name else ""
+            body = glyph
+            # A boss says which boss, in its own mark and in words beside
+            # it: there are seven at most, so the names cost no room, and a
+            # tooltip is no use to someone scanning for where to go next.
+            # An eighth the game adds later keeps the generic skull.
+            if kind == "boss" and name in BOSS_GLYPHS:
+                body = f'{BOSS_GLYPHS[name]}<i>{html.escape(name)}</i>'
+                title = ""
             out.append(
                 f'<b class="pin {kind}{" done" if pin["crossed"] else ""}"'
-                f' style="left:{left:.4f}%;top:{top:.4f}%"{title}>{glyph}</b>')
+                f' style="left:{left:.4f}%;top:{top:.4f}%"{title}>{body}</b>')
         marks = '<div class="pins">' + "".join(out) + "</div>"
     # Portals are few and carry names worth reading, so they get their name
     # beside them rather than a tooltip. Two sharing a name are the two ends
@@ -3050,7 +3075,11 @@ MAP_PAGE = """<!doctype html>
  .pin{position:absolute;transform:translate(-50%,-50%) scale(var(--unzoom,1));
    font-size:13px;line-height:1;color:#f3e6c8;
    text-shadow:0 0 2px #000,0 0 4px #000;pointer-events:auto;cursor:default}
- .pin.boss{color:#ff9a76;font-size:16px}
+ .pin.boss{color:#ff9a76;font-size:16px;white-space:nowrap}
+ /* The boss's name rides beside its mark, as a portal's does. */
+ .pin.boss i{font-style:normal;font-weight:700;font-size:10px;margin-left:3px;
+   color:#ffd3c2;vertical-align:middle;letter-spacing:.02em}
+ .pin.boss.done i{text-decoration:line-through}
  .pin.bed{color:#9fd0ff}
  .pin.mine{color:#ffd27f}
  .pin.house{color:#cbe8a0}

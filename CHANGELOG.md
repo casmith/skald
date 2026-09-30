@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.23.0
+
+- **Each boss gets its own mark on the map, and its name beside it.** Every
+  boss pin was the same skull with the name hidden in a tooltip, so a world
+  with ten altars showed ten identical marks and answered "which one?" one
+  hover at a time. Eikthyr is a bolt, the Elder a tree, Moder a snowflake,
+  Yagluth a meteor, the Queen a crown; Bonemass keeps the skull. A boss the
+  game adds later falls back to the skull and its tooltip.
+- A pin crossed off in game — how Valheim records the kill — now strikes
+  through the name as well, so a beaten boss reads as beaten.
+
 ## 0.22.1
 
 - A tighter halo on the night lights. The wide stamp reads as firelight over
