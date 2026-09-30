@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.24.0
+
+- **Deforestation, tracked over time.** How many stumps a world holds,
+  sampled on each save scan and kept as a series, with the change over the
+  last week and a sparkline. A stump carries no record of who felled it — it
+  is a destructible, not a built piece, so the game sets no creator on it —
+  so the tally is the world's and nobody's in particular. Checked against
+  1,375 real stumps across three worlds: a creator sat in the slot a build
+  piece keeps one in exactly zero times.
+- **Stumps on the map**, as a layer, off by default. A thousand of them over
+  a forest is a stain, and most visits are not about the logging.
+- One scan loop instead of six. Each reader had its own copy keyed on
+  `(path, size, mtime)`, which grew an entry per chunk rewrite, dumped the
+  whole cache at a size limit, and made the pass after that re-read the
+  entire world. Now keyed on the path alone and bounded by the directory, so
+  that sawtooth is gone — it was the shape of the I/O that stalled a host
+  once already, and it got worse with every reader added.
+
 ## 0.23.0
 
 - **Each boss gets its own mark on the map, and its name beside it.** Every

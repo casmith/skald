@@ -1397,6 +1397,10 @@ _PORTAL_FILES = {}
 # world -> everywhere somebody has built, and the files it came from
 WORLD_BUILT = {}
 _BUILT_FILES = {}
+# world -> where trees were felled. No creator on a stump, so this is a fact
+# about the world and never about a player.
+WORLD_STUMPS = {}
+_STUMP_FILES = {}
 # world -> {ore: [(x, z)]}. Only ever filled when an admin has
 # turned it on; when they have not, nothing is even read.
 WORLD_ORES = {}
@@ -1561,6 +1565,28 @@ def ore_png(world, ore):
     return body
 
 
+STUMP_COLOUR = (150, 122, 84)     # cut wood, against the green
+_STUMP_PNG = {}
+
+
+def stump_png(world):
+    """Where trees were felled in one world, as a transparent overlay.
+
+    Drawn as an image rather than as markers because a world can hold a
+    thousand of them, and a thousand elements is a slow page for a layer
+    most people will leave off.
+    """
+    points = WORLD_STUMPS.get(world) or []
+    if not points:
+        return None
+    held = _STUMP_PNG.get(world)
+    if held and held[0] == len(points):
+        return held[1]
+    body = fch.ore_png(points, TERRAIN_SIZE, STUMP_COLOUR)
+    _STUMP_PNG[world] = (len(points), body)
+    return body
+
+
 def terrain_worker():
     """Draw whatever is missing, one world at a time.
 
@@ -1677,6 +1703,17 @@ def refresh_world_maps():
                 directory, _CORPSE_FILES.setdefault(world, {}))
         except Exception as e:                     # a save mid-write, say
             print(f"corpses for {world}: {e}", flush=True)
+        try:
+            WORLD_STUMPS[world] = fch.world_stumps(
+                directory, _STUMP_FILES.setdefault(world, {}))
+            # The count is only interesting as a line, and the save is the
+            # only place it exists -- nothing in the event log mentions a
+            # tree -- so it is sampled here, where the chunks are already
+            # in hand, and kept in the database rather than recomputed.
+            store.put_stumps(db(), world, len(WORLD_STUMPS[world]),
+                             time.time())
+        except Exception as e:                     # a save mid-write, say
+            print(f"stumps for {world}: {e}", flush=True)
         if CONFIG.show_ores:
             try:
                 WORLD_ORES[world] = fch.world_ores(
@@ -1844,6 +1881,50 @@ def me_stats(h, now, names, primary):
         "days": daily(for_players(h, [primary]), now, CHART_DAYS),
         "recent": recent(for_players(h, [primary]), now, 10),
     }
+
+
+# A week is the window worth comparing against: long enough that an evening's
+# logging shows, short enough that it is still news.
+FELLED_WINDOW = 7 * 86400.0
+
+
+def render_felled(history, now):
+    """The felled-tree count, and how it has moved. Nothing if never sampled.
+
+    The joke needs the slope, not the number, so a world with one sample says
+    only how many there are and waits.
+    """
+    if not history:
+        return ""
+    at, n = history[-1]
+    line = f'<b>{fmt_n(n)}</b> tree{"" if n == 1 else "s"} felled'
+    # The oldest sample still inside the window, so the comparison is "a week
+    # ago" when there is a week of history and "since we started" when not.
+    old = [(t, v) for t, v in history if t >= now - FELLED_WINDOW]
+    was = old[0][1] if old else history[0][1]
+    span = now - (old[0][0] if old else history[0][0])
+    if len(history) > 1 and n != was:
+        d = n - was
+        how = "this week" if span >= FELLED_WINDOW * 0.9 else "so far"
+        line += (f' <span class="muted">&middot; {d:+d} {how}</span>')
+    spark = ""
+    if len(history) > 2:
+        lo = min(v for _, v in history)
+        hi = max(v for _, v in history)
+        t0, t1 = history[0][0], history[-1][0]
+        if hi > lo and t1 > t0:
+            pts = " ".join(
+                f"{(t - t0) / (t1 - t0) * 100:.1f},"
+                f"{(1 - (v - lo) / (hi - lo)) * 100:.1f}"
+                for t, v in history)
+            spark = ('<svg class="spark" viewBox="0 0 100 100"'
+                     ' preserveAspectRatio="none" aria-hidden="true">'
+                     f'<polyline points="{pts}"/></svg>')
+    return (f'<section class="card felled"><h3>Deforestation</h3>'
+            f'<p>{line}</p>{spark}'
+            f'<p class="muted note">A stump records no one who cut it, so '
+            f'this is the world\u2019s tally and nobody\u2019s in '
+            f'particular.</p></section>')
 
 
 def render_world_settings(settings, status):
@@ -2086,6 +2167,8 @@ def render(h, now, world, user=None):
             .replace("__WORLD__", render_world_settings(
                 world_settings(h, world), status_of(world)))
             .replace("__WEATHER__", weather_card)
+            .replace("__FELLED__", render_felled(
+                store.stump_history(db(), world), now))
             .replace("__TROPHIES__", f'<div class="trophies">{"".join(badges)}</div>')
             .replace("__MILESTONES__", "\n".join(ms_rows) or empty(3))
             .replace("__RAIDS__", "\n".join(raid_rows) or empty(3))
@@ -2216,6 +2299,10 @@ PAGE = """<!doctype html>
   vertical-align:.05rem}
  .dot.on{background:var(--on);box-shadow:0 0 6px rgba(143,196,106,.6)}
  /* Boss achievements: lit gold medallions, dim and locked until earned. */
+ .felled .note{font-size:.78rem;margin:.4rem 0 0}
+ .felled .spark{display:block;width:100%;height:34px;margin:.5rem 0 0}
+ .felled .spark polyline{fill:none;stroke:#967a54;stroke-width:2.5;
+   vector-effect:non-scaling-stroke;stroke-linejoin:round}
  .trophies{display:grid;grid-template-columns:repeat(auto-fill,minmax(7.4rem,1fr));gap:.55rem}
  .trophy{padding:.9rem .6rem .8rem;text-align:center;display:flex;flex-direction:column;align-items:center;gap:.25rem}
  .medal{width:3.3rem;height:3.3rem;border-radius:50%;display:grid;place-items:center;margin-bottom:.3rem;
@@ -2285,6 +2372,7 @@ __WHO__
 __CARD__
 __WORLD__
 __WEATHER__
+__FELLED__
 <h2>Bosses slain</h2>
 __TROPHIES__
 <h2>Other milestones</h2>
@@ -2881,6 +2969,7 @@ def render_map(requested, shared=None, seeds=None, fog=True,
     # legend does not mention it.
     ores = WORLD_ORES.get(pick["label"], {}) if CONFIG.show_ores else {}
     world_ores = [ore for ore, _, _ in ORE_LAYERS if ores.get(ore)]
+    world_stumps = WORLD_STUMPS.get(pick["label"]) or []
 
     # The legend. Everything is drawn and the boxes decide what is seen, so
     # a change costs nothing and -- the point of it -- does not throw away
@@ -2901,6 +2990,11 @@ def render_map(requested, shared=None, seeds=None, fog=True,
         rows.append(("boat", "\u26f5", "boats", len(world_boats), True))
     if world_corpses:
         rows.append(("corpse", "\u2020", "corpses", len(world_corpses), True))
+    # Off by default: a thousand stumps over a forest is a stain, and most
+    # visits are not about the logging.
+    if world_stumps:
+        rows.append(("stump", "\u2691", "stumps felled", len(world_stumps),
+                     False))
     for ore in world_ores:
         rows.append((ore, "\u25c6", ore, len(ores[ore]), False))
     # At night only the lights are on. Everything else is a label over a
@@ -2937,8 +3031,13 @@ def render_map(requested, shared=None, seeds=None, fog=True,
             "built more" if night else
             " &middot; terrain drawn from the world seed; the lit part is what "
             "the group has explored" if terrain else "")
+    # Nothing records who felled a tree, so this is the world's number and
+    # not anybody's -- which is most of what makes it funny.
+    felled = (f' &middot; {fmt_n(len(world_stumps))} tree'
+              f'{"" if len(world_stumps) == 1 else "s"} felled'
+              if world_stumps else "")
     body = (f'<p class="facts"><b>{label}</b>{when} &middot; {share:.2f}% of the map '
-            f'seen &middot; {where}{seed_line}</p>'
+            f'seen{felled} &middot; {where}{seed_line}</p>'
             f'<div class="viewer" id="viewer">'
             f'<div class="plate{" night" if night else ""}{off_at_first}" id="plate">'
             + terrain
@@ -2946,6 +3045,9 @@ def render_map(requested, shared=None, seeds=None, fog=True,
                f'{"&night=1" if night else ""}"'
                f' alt="" width="{edge}" height="{edge}">'
                if world_built else "")
+            + (f'<img class="stump" src="/stumps.png?world={pick["key"]}"'
+               f' alt="" width="{edge}" height="{edge}">'
+               if world_stumps else "")
             + "".join(
                 f'<img class="ore {ore}" src="/ore.png?world={pick["key"]}'
                 f'&ore={ore}" alt="" width="{edge}" height="{edge}">'
@@ -3029,6 +3131,7 @@ MAP_PAGE = """<!doctype html>
  .maplegend .key.house{color:#cbe8a0}
  .maplegend .key.portals{color:#c9a3ff}
  .maplegend .key.built{color:#f0b060}
+ .maplegend .key.stump{color:#967a54}
  .maplegend .key.corpse{color:#ff8080}
  .maplegend .key.boat{color:#7fd4c8}
  /* What time it is in there. Night reads cold, midday warm, so the colour
@@ -3045,12 +3148,14 @@ MAP_PAGE = """<!doctype html>
  /* The ore sits above the ground and below the fog, like the building:
     you can only have seen a vein somewhere you have been. */
  .ore{image-rendering:pixelated}
+ .stump{image-rendering:pixelated;opacity:.8}
  /* What the boxes actually do. Hiding is a class on the plate, so a
     change is one attribute and nothing is redrawn or refetched. */
  .plate.off-boat .pin.boat,
  .plate.off-corpse .pin.corpse,
  .plate.off-portals #portals,
  .plate.off-built .built,
+ .plate.off-stump .stump,
  .plate.off-silver .ore.silver, .plate.off-copper .ore.copper,
  .plate.off-tin .ore.tin, .plate.off-obsidian .ore.obsidian,
  .plate.off-boss .pin.boss, .plate.off-bed .pin.bed,
@@ -3124,6 +3229,7 @@ MAP_PAGE = """<!doctype html>
     stays as it is: there are no lights where nobody has been. */
  .plate.night .terrain{filter:brightness(.26) saturate(.3) contrast(.95)}
  .plate.night .ore{opacity:.45}
+ .plate.night .stump{opacity:.3}
  .plate.night .built{filter:brightness(1.3) saturate(1.1)}
  .plate.night .pin{opacity:.7}
  .plate img{position:absolute;inset:0;width:100%;height:100%;
@@ -3728,6 +3834,18 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", "image/png")
             self.send_header("Content-Length", str(len(body)))
             # People build, so unlike the terrain this does change.
+            self.send_header("Cache-Control", "public, max-age=300")
+            self.end_headers()
+            return self.wfile.write(body)
+        if path == "/stumps.png":
+            want = params.get("world", [""])[0]
+            body = stump_png(want) if want in SERVERS else None
+            if not body:
+                return self._send(404, "no stumps for that world", "text/plain")
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Length", str(len(body)))
+            # People keep chopping.
             self.send_header("Cache-Control", "public, max-age=300")
             self.end_headers()
             return self.wfile.write(body)

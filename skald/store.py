@@ -154,6 +154,19 @@ SCHEMA = [
         PRIMARY KEY (steam_id, world_uid)
     );
     """,
+    # v8: how many stumps a world holds, sampled over time. Nothing records
+    # who felled a tree -- a stump is a destructible, not a built piece, so
+    # there is no creator on it -- which makes this a fact about the world
+    # rather than about anybody in it. Kept as a series because the number
+    # alone says little and the slope is the joke.
+    """
+    CREATE TABLE stumps (
+        world TEXT NOT NULL,
+        at    REAL NOT NULL,          -- when the count was taken
+        n     INTEGER NOT NULL,
+        PRIMARY KEY (world, at)
+    );
+    """,
 ]
 
 
@@ -554,3 +567,27 @@ def import_legacy(conn, data_dir):
         conn.execute("INSERT OR REPLACE INTO meta (k, v) VALUES ('imported_json', ?)",
                      (str(count),))
     return count
+
+# A day of standing still is worth one row; anything that moved is worth one
+# straight away. Sampling every scan would write 48 identical rows a day.
+STUMP_QUIET = 86400.0
+
+
+def put_stumps(conn, world, n, at):
+    """Record a stump count if it says anything the last one did not."""
+    last = conn.execute(
+        "SELECT at, n FROM stumps WHERE world = ? ORDER BY at DESC LIMIT 1",
+        (world,)).fetchone()
+    if last is not None and last["n"] == n and at - last["at"] < STUMP_QUIET:
+        return False
+    with conn:
+        conn.execute("INSERT OR REPLACE INTO stumps (world, at, n) "
+                     "VALUES (?, ?, ?)", (world, at, n))
+    return True
+
+
+def stump_history(conn, world):
+    """Every sample for a world, oldest first: [(at, n)]."""
+    return [(r["at"], r["n"]) for r in conn.execute(
+        "SELECT at, n FROM stumps WHERE world = ? ORDER BY at",
+        (world,)).fetchall()]

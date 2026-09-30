@@ -402,6 +402,54 @@ MAP_PIXEL_SIZE = 12
 MAP_SPAN = 2048 * MAP_PIXEL_SIZE / 2
 
 
+def _scan_files(directory, cache, read):
+    """Yield each file in `directory` passed through `read`, oldest name first.
+
+    The cache is keyed by path alone and holds (size, mtime, found), so it is
+    bounded by the number of files in the directory and never needs emptying.
+    Keying it by (path, size, mtime) -- which six copies of this loop each
+    did -- grew a fresh entry every time a chunk was rewritten, dumped the
+    whole cache on hitting a size limit, and made the pass after that re-read
+    the entire world. That sawtooth is the shape of the I/O that stalled the
+    host once already, and every reader added made it worse.
+    """
+    try:
+        names = sorted(os.listdir(directory))
+    except OSError:
+        return
+    for name in names:
+        path = os.path.join(directory, name)
+        try:
+            st = os.stat(path)
+        except OSError:
+            continue
+        if not os.path.isfile(path):
+            continue
+        was = cache.get(path) if cache is not None else None
+        if was is not None and was[0] == st.st_size and was[1] == st.st_mtime:
+            yield was[2]
+            continue
+        found = read(path)
+        if cache is not None:
+            cache[path] = (st.st_size, st.st_mtime, found)
+        yield found
+
+
+def _scan_chunks(directory, cache, read):
+    """Every chunk's findings in one world, concatenated.
+
+    A reader may return None to disown a whole file rather than hand back a
+    half-read one -- _portals_in does, on a single implausible position. That
+    is not the same as finding nothing, but both mean there is nothing here
+    to add.
+    """
+    out = []
+    for found in _scan_files(directory, cache, read):
+        if found:
+            out.extend(found)
+    return out
+
+
 def world_map(directory, cache=None):
     """The shared map for a world, from its save directory.
 
@@ -423,19 +471,17 @@ def world_map(directory, cache=None):
             continue
         if not os.path.isfile(path):
             continue
-        key = (path, st.st_size, st.st_mtime)
-        if cache is not None and key in cache:
-            found = cache[key]
+        # Keyed on the path, holding size and mtime, so a save that has not
+        # moved is not decompressed again and the cache cannot outgrow the
+        # directory. It used to be keyed on all three and emptied wholesale
+        # at MAX_CACHED_SAVES, which re-read every world on the next pass.
+        was = cache.get(path) if cache is not None else None
+        if was is not None and was[0] == st.st_size and was[1] == st.st_mtime:
+            found = was[2]
         else:
             found = _world_map_in(path)
             if cache is not None:
-                # Keyed on path, size and mtime, so a save that has not moved
-                # is not decompressed again. Clearing it here instead -- which
-                # is what this did -- left only the last file cached, so every
-                # pass re-read the whole world.
-                if len(cache) > MAX_CACHED_SAVES:
-                    cache.clear()
-                cache[key] = found
+                cache[path] = (st.st_size, st.st_mtime, found)
         if found and (best is None or found["seen"] > best["seen"]):
             best = dict(found, path=path, mtime=st.st_mtime)
     return best
@@ -602,31 +648,7 @@ def world_portals(directory, cache=None):
     already reads, and a portal with a name on it is the most useful label a
     map can carry. Two portals sharing a name are the two ends of one.
     """
-    out = []
-    try:
-        names = sorted(os.listdir(directory))
-    except OSError:
-        return out
-    for name in names:
-        path = os.path.join(directory, name)
-        try:
-            st = os.stat(path)
-        except OSError:
-            continue
-        if not os.path.isfile(path):
-            continue
-        key = (path, st.st_size, st.st_mtime)
-        if cache is not None and key in cache:
-            found = cache[key]
-        else:
-            found = _portals_in(path)
-            if cache is not None:
-                cache[key] = found
-        if found:
-            out.extend(found)
-    if cache is not None and len(cache) > 400:
-        cache.clear()
-    return out
+    return _scan_chunks(directory, cache, _portals_in)
 
 
 # What a person can build. Not every buildable in the game -- it does not
@@ -737,30 +759,8 @@ def world_construction(directory, cache=None):
     """Everywhere somebody has built something, in one world."""
     prefabs = {struct.pack("<i", stable_hash(n)): n in LIGHT_PIECES
                for n in BUILD_PIECES}
-    out = []
-    try:
-        names = sorted(os.listdir(directory))
-    except OSError:
-        return out
-    for name in names:
-        path = os.path.join(directory, name)
-        try:
-            st = os.stat(path)
-        except OSError:
-            continue
-        if not os.path.isfile(path):
-            continue
-        key = (path, st.st_size, st.st_mtime)
-        if cache is not None and key in cache:
-            found = cache[key]
-        else:
-            found = _construction_in(path, prefabs)
-            if cache is not None:
-                cache[key] = found
-        out.extend(found)
-    if cache is not None and len(cache) > 400:
-        cache.clear()
-    return out
+    return _scan_chunks(directory, cache,
+                        lambda path: _construction_in(path, prefabs))
 
 
 # The light each piece casts. Stamped rather than blurred: a blur over four
@@ -941,29 +941,10 @@ def world_ores(directory, cache=None):
     pats = {struct.pack("<i", stable_hash(prefab)): ore
             for ore, prefab in ORES.items()}
     out = {}
-    try:
-        names = sorted(os.listdir(directory))
-    except OSError:
-        return out
-    for name in names:
-        path = os.path.join(directory, name)
-        try:
-            st = os.stat(path)
-        except OSError:
-            continue
-        if not os.path.isfile(path):
-            continue
-        key = (path, st.st_size, st.st_mtime)
-        if cache is not None and key in cache:
-            found = cache[key]
-        else:
-            found = _ores_in(path, pats)
-            if cache is not None:
-                cache[key] = found
+    for found in _scan_files(directory, cache,
+                             lambda path: _ores_in(path, pats)):
         for ore, pts in found.items():
             out.setdefault(ore, []).extend(pts)
-    if cache is not None and len(cache) > 400:
-        cache.clear()
     return out
 
 
@@ -1047,32 +1028,51 @@ def _corpses_in(path):
     return out
 
 
+# The stumps a felled tree leaves behind. Nothing records who swung the axe:
+# a stump is a destructible, not a built piece, so there is no creator field
+# for the game to set, and no name anywhere in the record -- 1,375 of them
+# across three worlds carried a creator in the slot a build piece keeps one
+# in exactly zero times. What a stump does carry is health, a spawn time and
+# sometimes a seed. So this counts them and places them, and attributes
+# nothing to anybody.
+STUMPS = ("FirTree_Stub", "BirchStub", "Beech_Stub", "Pinetree_01_Stub",
+          "SwampTree1_Stub")
+
+
+def _stumps_in(path, pats):
+    """Where trees were felled in one chunk: [(x, z)]."""
+    try:
+        with open(path, "rb") as f:
+            blob = f.read()
+    except OSError:
+        return []
+    out = []
+    for needle in pats:
+        at = blob.find(needle)
+        while at != -1:
+            if at >= PORTAL_POS_BACK:
+                x, y, z = struct.unpack_from("<3f", blob, at - PORTAL_POS_BACK)
+                # Five prefabs are searched for by a four-byte hash, so some
+                # matches are chance. A stump sits on the ground it grew on,
+                # which is a narrower claim than the corpses need: no cave
+                # interior five thousand metres up, and nothing underwater.
+                if (-MAP_SPAN < x < MAP_SPAN and -MAP_SPAN < z < MAP_SPAN
+                        and -100.0 < y < 500.0):
+                    out.append((x, z))
+            at = blob.find(needle, at + 4)
+    return out
+
+
+def world_stumps(directory, cache=None):
+    """Every stump in a world: [(x, z)]. Its length is the felled count."""
+    pats = tuple(struct.pack("<i", stable_hash(n)) for n in STUMPS)
+    return _scan_chunks(directory, cache,
+                        lambda path: _stumps_in(path, pats))
+
+
 def world_corpses(directory, cache=None):
     """Every corpse still lying in a world, with whose it is."""
-    out = []
-    try:
-        names = sorted(os.listdir(directory))
-    except OSError:
-        return out
-    for name in names:
-        path = os.path.join(directory, name)
-        try:
-            st = os.stat(path)
-        except OSError:
-            continue
-        if not os.path.isfile(path):
-            continue
-        key = (path, st.st_size, st.st_mtime)
-        if cache is not None and key in cache:
-            found = cache[key]
-        else:
-            found = _corpses_in(path)
-            if cache is not None:
-                cache[key] = found
-        out.extend(found)
-    if cache is not None and len(cache) > 400:
-        cache.clear()
-    return out
+    return _scan_chunks(directory, cache, _corpses_in)
 
 
 # Boats, by what the save calls them. They are worth finding because they
@@ -1113,30 +1113,8 @@ def world_boats(directory, cache=None):
     """Every boat in a world, and what kind each is."""
     pats = {struct.pack("<i", stable_hash(prefab)): kind
             for prefab, kind in BOATS.items()}
-    out = []
-    try:
-        names = sorted(os.listdir(directory))
-    except OSError:
-        return out
-    for name in names:
-        path = os.path.join(directory, name)
-        try:
-            st = os.stat(path)
-        except OSError:
-            continue
-        if not os.path.isfile(path):
-            continue
-        key = (path, st.st_size, st.st_mtime)
-        if cache is not None and key in cache:
-            found = cache[key]
-        else:
-            found = _boats_in(path, pats)
-            if cache is not None:
-                cache[key] = found
-        out.extend(found)
-    if cache is not None and len(cache) > 400:
-        cache.clear()
-    return out
+    return _scan_chunks(directory, cache,
+                        lambda path: _boats_in(path, pats))
 
 
 # The map texture is square but the world is not. Valheim's ground stops at
