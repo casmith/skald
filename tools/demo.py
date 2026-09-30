@@ -203,6 +203,21 @@ def world_objects():
         out += struct.pack("<3f", x, y, z)
         out += struct.pack("<i", stable_hash("Player_tombstone"))
         out += struct.pack("<i", stable_hash("ownerName")) + _string(who)
+    # A cleared patch of forest near the village, plus stragglers further
+    # out, so the felled count has a shape and the layer something to show.
+    # Deliberately no creator on any of them: the game puts none on a stump,
+    # and the tally is the world's rather than anybody's because of it.
+    rng = random.Random(7)
+    for _ in range(340):
+        if rng.random() < 0.75:
+            x, z = -150.0 + rng.gauss(0, 60), 230.0 + rng.gauss(0, 60)
+        else:
+            x, z = rng.uniform(-2000, 2000), rng.uniform(-2000, 2000)
+        out += struct.pack("<3f", x, 30.0 + rng.uniform(0, 8), z)
+        out += struct.pack("<i", stable_hash(rng.choice(
+            ["Beech_Stub", "FirTree_Stub", "BirchStub", "Pinetree_01_Stub"])))
+        out += struct.pack("<i", stable_hash("health")) + struct.pack("<f", 1.0)
+
     # A village around the home portal, so the building layer has something
     # to light up. Only pieces with a creator count as built.
     rng = random.Random(11)

@@ -25,7 +25,7 @@ Valheim stores no terrain: it rebuilds the world from one number every time
 it loads. Drawing a map means doing the same arithmetic rather than reading a
 picture. Over that goes what your cartography table has shared, and the
 things worth finding again — portals and where they lead, what people have
-built, boats, and corpses nobody has fetched.
+built, boats, corpses nobody has fetched, and every stump somebody left.
 
 </details>
 
@@ -85,9 +85,13 @@ server](#trying-it-without-a-server).)*
 - **A group map on real terrain**: the world drawn from its own seed, with
   your cartography table laid over it. Nothing is uploaded — it is read from
   the save the server already writes.
-- **Layers on that map**, each a checkbox: pins split by kind, portals with
-  a line to the other end when you tap one, where people have built, corpses
-  nobody has fetched (including the ones in caves), and boats.
+- **Layers on that map**, each a checkbox: pins split by kind, each boss
+  named at its own altar, portals with a line to the other end when you tap
+  one, where people have built, corpses nobody has fetched (including the
+  ones in caves), boats, and where the trees used to be.
+- **A deforestation count**, tracked over time, because somebody is doing
+  this. A stump carries no record of who felled it, so the tally is the
+  world's and nobody's in particular.
 - **Where the ore still is** — silver, copper, tin, obsidian — if the server
   owner enables it. Off by default: it retires the wishbone, so it is their
   call rather than Skald's.

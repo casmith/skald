@@ -214,5 +214,6 @@ def test_the_schema_still_has_every_step_it_ever_had():
     one renumbers the rest and every existing database would try to apply
     somebody else's migration."""
     from skald import store
-    assert len(store.SCHEMA) == 7
+    assert len(store.SCHEMA) == 8
     assert "CREATE TABLE maps" in store.SCHEMA[6]
+    assert "CREATE TABLE stumps" in store.SCHEMA[7]
