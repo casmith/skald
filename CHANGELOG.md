@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.24.1
+
+- **One pixel per stump, not a 36-metre cross.** The stump layer reused the
+  ore layer's mark, which is deliberately bigger than a pixel so a vein can
+  be found by eye. At 12 metres to the pixel that is 36 metres across for a
+  thing about a metre wide, so twenty stumps in a clearing merged into a blob
+  reaching past the trees that were ever there -- a felled field read as a
+  carpet, including ground that had been cleared of its stumps too. The ore
+  layers keep the cross.
+- The counts themselves are unchanged. They were checked after the report:
+  every position is distinct, none collides with another object's, and the
+  two things that might have marked a bad read -- no health field, and
+  sitting off the height the seed gives -- turn out to be statistically
+  independent of each other, which is what two unrelated noise sources look
+  like rather than two detectors of the same fault. The second has an
+  innocent explanation anyway: terraforming moves the ground out from under
+  the generated height.
+
 ## 0.24.0
 
 - **Deforestation, tracked over time.** How many stumps a world holds,

@@ -948,19 +948,25 @@ def world_ores(directory, cache=None):
     return out
 
 
-def ore_png(points, edge, colour, span=None):
-    """One ore's deposits, as a transparent overlay.
+# A deposit is a point, and a point at twelve metres to the pixel is
+# invisible, so each is drawn as a small cross: big enough to find, small
+# enough that a seam of two thousand tin does not become a smear.
+CROSS = ((0, 0), (1, 0), (-1, 0), (0, 1), (0, -1))
+# One pixel, for things there are a thousand of. The cross is 36 metres
+# across at this scale; that is right for a vein you are hunting for and
+# wrong for a stump, where it turned twenty of them in a clearing into one
+# blob and read as a field full of them.
+DOT = ((0, 0),)
 
-    A deposit is a point, and a point at twelve metres to the pixel is
-    invisible, so each is drawn as a small cross -- big enough to find,
-    small enough that a seam of two thousand tin does not become a smear.
-    """
+
+def ore_png(points, edge, colour, span=None, stamp=CROSS):
+    """Points as a transparent overlay, each drawn with `stamp`."""
     span = MAP_SPAN if span is None else span
     hit = bytearray(edge * edge)
     for x, z in points:
         cx = int((x + span) / (2 * span) * edge)
         cy = int((span - z) / (2 * span) * edge)
-        for dx, dy in ((0, 0), (1, 0), (-1, 0), (0, 1), (0, -1)):
+        for dx, dy in stamp:
             px, py = cx + dx, cy + dy
             if 0 <= px < edge and 0 <= py < edge:
                 hit[py * edge + px] = 1
