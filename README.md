@@ -32,7 +32,7 @@ boats, corpses nobody has fetched, and every stump somebody left.
 </details>
 
 <details>
-<summary><b>The same world at night</b>, lit by what people have built</summary>
+<summary><b>A world at night</b>, lit by what people have built</summary>
 
 ![The night view: the ground dimmed and construction drawn as lights, a
 settlement burning white against scattered embers](docs/screenshots/map-night.png)
