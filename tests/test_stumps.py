@@ -164,3 +164,56 @@ def test_a_reader_that_disowns_a_file_does_not_break_the_scan(tmp_path):
     assert fch._scan_chunks(str(tmp_path), None, lambda p: None) == []
     assert fch._scan_chunks(str(tmp_path), {}, lambda p: None) == []
     assert fch._scan_chunks(str(tmp_path), None, lambda p: [1, 2]) == [1, 2]
+
+
+# ---- how big a stump is drawn --------------------------------------------
+
+def _lit(points, stamp, edge=256):
+    """How many pixels an overlay actually turns on."""
+    import zlib
+    png = fch.ore_png(points, edge, (1, 2, 3), stamp=stamp)
+    # the IDAT is the only compressed chunk; walk the PNG to find it
+    i, idat = 8, b""
+    while i < len(png):
+        n = int.from_bytes(png[i:i + 4], "big")
+        kind = png[i + 4:i + 8]
+        if kind == b"IDAT":
+            idat += png[i + 8:i + 8 + n]
+        i += 12 + n
+    raw = zlib.decompress(idat)
+    stride = edge + 1
+    return sum(1 for y in range(edge)
+               for x in range(edge) if raw[y * stride + 1 + x])
+
+
+def test_a_stump_is_one_pixel_and_a_vein_is_a_cross():
+    """The cross is 36 metres across at the real scale. That is right for a
+    vein you are hunting and wrong for a stump: twenty in a clearing became
+    one blob that read as a field full of them."""
+    one = [(0.0, 0.0)]
+    assert _lit(one, fch.DOT) == 1
+    assert _lit(one, fch.CROSS) == 5
+
+
+def test_the_ore_layers_were_left_alone():
+    """Only the stumps wanted the smaller mark."""
+    import inspect
+    assert inspect.signature(
+        fch.ore_png).parameters["stamp"].default is fch.CROSS
+
+
+def test_a_felled_clearing_no_longer_smears_past_itself():
+    """At the resolution the map is drawn at -- 2048 px over 24,576 m, so 12 m
+    a pixel -- a dot is one mark per stump and a cross is five. Twenty stumps
+    in a clearing is the case that mattered: the crosses ran together into a
+    blob reaching well past the trees that were felled."""
+    clearing = [(x * 13.0, 0.0) for x in range(20)]
+    dots = _lit(clearing, fch.DOT, edge=2048)
+    crosses = _lit(clearing, fch.CROSS, edge=2048)
+    assert dots == 20                      # one mark each, none merged
+    assert crosses > 3 * dots              # and the old stamp smeared
+
+    # Stumps in adjacent pixels: dots stay separate, crosses become one bar.
+    tight = [(0.0, 0.0), (12.0, 0.0), (24.0, 0.0)]
+    assert _lit(tight, fch.DOT, edge=2048) == 3
+    assert _lit(tight, fch.CROSS, edge=2048) < 15

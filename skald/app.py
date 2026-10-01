@@ -1582,7 +1582,11 @@ def stump_png(world):
     held = _STUMP_PNG.get(world)
     if held and held[0] == len(points):
         return held[1]
-    body = fch.ore_png(points, TERRAIN_SIZE, STUMP_COLOUR)
+    # One pixel each, not the ore layer's cross. A stump is about a metre
+    # across and a pixel here is twelve, so a dot already overstates it by
+    # an order of magnitude; the cross overstated it by thirty-six and made
+    # a felled clearing look like a carpet reaching past the trees.
+    body = fch.ore_png(points, TERRAIN_SIZE, STUMP_COLOUR, stamp=fch.DOT)
     _STUMP_PNG[world] = (len(points), body)
     return body
 
