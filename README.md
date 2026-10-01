@@ -18,14 +18,31 @@ badges](docs/screenshots/dashboard.png)
 <details>
 <summary><b>The map</b> — the world drawn from its own seed</summary>
 
-![The map: terrain generated from the world seed, with portals, buildings,
-boats and corpses over it](docs/screenshots/map.png)
+![The map: terrain drawn from the world seed, fogged to what the group has
+explored, with boss altars, portals, boats and corpses over
+it](docs/screenshots/map.png)
 
 Valheim stores no terrain: it rebuilds the world from one number every time
 it loads. Drawing a map means doing the same arithmetic rather than reading a
-picture. Over that goes what your cartography table has shared, and the
-things worth finding again — portals and where they lead, what people have
-built, boats, corpses nobody has fetched, and every stump somebody left.
+picture. Over that goes what your cartography table has shared — the lit part
+above is everywhere the group has been — and the things worth finding again:
+portals and where they lead, each boss altar named, what people have built,
+boats, corpses nobody has fetched, and every stump somebody left.
+
+</details>
+
+<details>
+<summary><b>The same world at night</b>, lit by what people have built</summary>
+
+![The night view: the ground dimmed and construction drawn as lights, a
+settlement burning white against scattered embers](docs/screenshots/map-night.png)
+
+The ground dims and building is drawn as light, the way the dark side of the
+earth looks from orbit. A settlement of a couple of thousand pieces burns
+white; a hut on a headland is one faint ember, but it is there. Fires count
+for more than walls — hearths, torches, forges and kilns are weighted six to
+one, since what you would see at night is what is burning. The scale is
+absolute and logarithmic, so two worlds can be compared.
 
 </details>
 
