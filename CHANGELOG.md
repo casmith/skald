@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.24.2
+
+- **A three-pixel halo on the night lights, down from five.** A pixel is
+  twelve metres and a building piece is about two, so even one overstates
+  it; five turned every cluster into a soft bubble sixty metres across and
+  ran a row of houses into one blob. Half as many pixels are lit now and
+  structures read as structures — a long wall as a line, a hall as a
+  rectangle, a hut on a headland as a point rather than a smudge.
+- The brightness ceiling came down with it, to 1900, so nothing dims. The
+  kernel's weights fell to 40 from 96, but the peak only falls to about 0.68
+  of what it was, because a tighter stamp also stops neighbouring pieces
+  feeding each other's pixels. Scaling by the weights would have lit every
+  settlement a step too bright; 0.68 is what two real worlds give at the
+  resolution the map is drawn at.
+- The day view keeps its wider halo. That one reads as firelight over a
+  settlement, which is what it is for.
+
 ## 0.24.1
 
 - **One pixel per stump, not a 36-metre cross.** The stump layer reused the

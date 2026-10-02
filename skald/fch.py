@@ -800,12 +800,15 @@ GLOW_FULL = 120
 # At night the halo is smaller. The wide stamp reads as firelight over a
 # settlement, which is what the day view wants; from orbit a town is a point,
 # and a soft edge four hundred metres across turns a village into a smudge.
+#
+# Three pixels across, not five. A pixel is twelve metres and a building
+# piece is about two, so even one overstates it; five made every cluster a
+# soft bubble sixty metres wide and a row of houses one blob. The ring is
+# dim enough to read as a glow rather than as ground that was built on.
 _NIGHT_GLOW = (
-    (0, 1, 2, 1, 0),
-    (1, 5, 10, 5, 1),
-    (2, 10, 20, 10, 2),
-    (1, 5, 10, 5, 1),
-    (0, 1, 2, 1, 0),
+    (1, 4, 1),
+    (4, 20, 4),
+    (1, 4, 1),
 )
 
 # Seen from orbit at night. A city is a white core inside an orange halo;
@@ -820,7 +823,14 @@ NIGHT_ALPHA = (0, 70, 110, 145, 175, 200, 225, 242, 255)
 # worlds can be compared, and logarithmic so the range from one hut to a
 # capital fits in eight steps -- a hut lands around the fourth, a hamlet the
 # sixth, a town the seventh, a city white.
-NIGHT_FULL = 2800
+# Scaled with the stamp, but measured rather than reasoned: the kernel's
+# weights sum to 40 where they summed to 96, yet the peak only falls to
+# about 0.68 of what it was, because a tighter stamp also means neighbouring
+# pieces stop feeding each other's pixels. Taking the ratio from the weights
+# would have dropped this to 1170 and lit every settlement a step too
+# bright. 0.68 is what two real worlds give at the resolution the map is
+# actually drawn at.
+NIGHT_FULL = 1900
 _NIGHT_LOG = math.log1p(NIGHT_FULL)
 
 
