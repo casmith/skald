@@ -107,3 +107,31 @@ def test_by_day_they_are_all_on(monkeypatch):
     page = _page(False, monkeypatch)
     ticked = set(re.findall(r'<input type="checkbox" checked data-layer="(\w+)"', page))
     assert {"built", "portals", "boat", "corpse"} <= ticked, ticked
+
+
+def test_the_halo_is_three_pixels_across():
+    """A pixel is twelve metres and a building piece is about two, so even
+    one pixel overstates it. Five made a cluster a soft bubble sixty metres
+    wide and ran neighbouring houses into one blob."""
+    assert len(fch._NIGHT_GLOW) == 3
+    assert all(len(row) == 3 for row in fch._NIGHT_GLOW)
+    # every weight non-zero: a 3x3 with hollow corners would be a plus sign
+    assert all(w for row in fch._NIGHT_GLOW for w in row)
+
+
+def test_one_piece_lights_nine_pixels_not_twenty_one():
+    import zlib
+    edge = 64
+    png = fch.construction_png([(0.0, 0.0, False)], edge, night=True)
+    start = png.index(b"IDAT")
+    size = int.from_bytes(png[start - 4:start], "big")
+    raw = zlib.decompress(png[start + 4:start + 4 + size])
+    lit = sum(1 for y in range(edge)
+              for v in raw[y * (edge + 1) + 1:(y + 1) * (edge + 1)] if v)
+    assert lit == 9
+
+
+def test_the_day_view_keeps_its_wider_halo():
+    """Only the night view was tightened. The wide stamp reads as firelight
+    over a settlement, which is what the day view is for."""
+    assert len(fch._GLOW) == 9
