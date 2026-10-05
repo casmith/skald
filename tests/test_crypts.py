@@ -70,7 +70,9 @@ def test_the_map_marks_each_crypt_and_counts_them(monkeypatch):
     box = re.search(r'<label><input[^>]*data-layer="crypt"[^>]*>.*?</label>',
                     page, re.S)
     assert box, "no crypt box in the legend"
-    assert " checked" in box.group(0)
+    # Off at first, and hidden to match the box.
+    assert " checked" not in box.group(0)
+    assert re.search(r'class="plate[^"]*\boff-crypt\b', page)
     assert "sunken crypts <span>2</span>" in box.group(0)
     assert ".plate.off-crypt .pin.crypt" in page
 

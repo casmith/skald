@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.25.1
+
+- **The sunken crypts layer starts unticked.** On real worlds it found 56,
+  138 and 157, not the handful expected: once a swamp has been generated, it
+  is thick with crypts, and that many headstones crowd out the marks people
+  placed themselves. Tick the box to see them.
+
 ## 0.25.0
 
 - **Sunken crypts on the map.** Each one gets a swamp-green headstone where

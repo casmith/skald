@@ -3013,9 +3013,11 @@ def render_map(requested, shared=None, seeds=None, fog=True,
         if by_kind.get(kind):
             rows.append((kind, PIN_GLYPHS.get(kind, "\u25cf"), what,
                          by_kind[kind], True))
+    # Off by default too: a swamp can hold a hundred and fifty of them, and
+    # most visits are not a crypt run.
     if world_crypts:
         rows.append(("crypt", "\u26fc", "sunken crypts", len(world_crypts),
-                     True))
+                     False))
     if world_boats:
         rows.append(("boat", "\u26f5", "boats", len(world_boats), True))
     if world_corpses:
