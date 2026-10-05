@@ -85,6 +85,8 @@ adds personal features. Nothing changes for people who do not.
       the other end when you tap one, where people have built, corpses
       nobody has fetched including the ones in caves, boats, and stumps
 - [x] Each boss altar with its own mark and its name (0.23.0)
+- [x] Sunken crypts, marked at their entrances, for the ones the world has
+      generated (0.25.0)
 - [x] A night view: the ground dimmed and construction drawn as lights, with
       fires weighted over walls, on an absolute log scale so two worlds can
       be compared (0.22.0)

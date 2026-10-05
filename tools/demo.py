@@ -139,6 +139,9 @@ DEMO_PORTALS = [("home", -170.0, 250.0), ("home", 1120.0, 880.0),
                 ("swamp", -960.0, -620.0), ("swamp", -150.0, 260.0),
                 ("", 700.0, -260.0)]
 DEMO_BOATS = [("Karve", -220.0, 300.0), ("VikingShip", -260.0, 330.0)]
+# The crypt the "crypt" pin and the "swamp" portal were left for, and one
+# further in that nobody has marked yet.
+DEMO_CRYPTS = [(-985.0, -650.0, 28.0), (-1240.0, -520.0, 26.5)]
 # One left on a hillside, one still in a crypt -- the case worth showing,
 # since a cave's inside is built five thousand metres above its entrance.
 DEMO_CORPSES = [("Bera", 690.0, -250.0, 34.0), ("Cnut", -980.0, -640.0, 5120.0)]
@@ -188,7 +191,7 @@ def cartography(rng, edge=MAP_EDGE):
 
 
 def world_objects():
-    """Portals, boats, corpses and a village, in the shape the game writes:
+    """Portals, boats, crypts, corpses and a village, in the shape the game writes:
     a position, then the prefab's hash, then its fields."""
     out = bytearray()
     for tag, x, z in DEMO_PORTALS:
@@ -199,6 +202,9 @@ def world_objects():
             out += struct.pack("<i", stable_hash("tag")) + _string(tag)
     for prefab, x, z in DEMO_BOATS:
         out += struct.pack("<3f", x, 30.0, z) + struct.pack("<i", stable_hash(prefab))
+    for x, z, y in DEMO_CRYPTS:
+        out += struct.pack("<3f", x, y, z)
+        out += struct.pack("<i", stable_hash("sunken_crypt_gate"))
     for who, x, z, y in DEMO_CORPSES:
         out += struct.pack("<3f", x, y, z)
         out += struct.pack("<i", stable_hash("Player_tombstone"))

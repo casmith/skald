@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.25.0
+
+- **Sunken crypts on the map.** Each one gets a swamp-green headstone where
+  its entrance is, plus a box in the legend with the count, ticked by
+  default. A world has only a handful of crypts and each is worth a trip,
+  so the layer earns its space in a way the stumps never did.
+- They are found by the iron gate across each entrance. The crypt itself
+  isn't a world object; the game keeps locations in a separate list. Every
+  crypt has exactly one gate, though, and the gate is an object. The inside
+  of a crypt is built five thousand metres up, like a cave's, so anything
+  found up there is left out and the mark goes on the swamp, where you
+  walk in.
+- These are the crypts the server has *generated*, which only happens once
+  somebody has been nearby. So the layer follows exploration and can't be
+  used to scout ahead, the same as the fog.
+
 ## 0.24.2
 
 - **A three-pixel halo on the night lights, down from five.** A pixel is

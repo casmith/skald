@@ -1411,6 +1411,9 @@ _CORPSE_FILES = {}
 # world -> the boats in it, wherever somebody left them
 WORLD_BOATS = {}
 _BOAT_FILES = {}
+# world -> the sunken crypts it has generated, by their entrances
+WORLD_CRYPTS = {}
+_CRYPT_FILES = {}
 _CARTO_FILES = {}
 
 
@@ -1702,6 +1705,11 @@ def refresh_world_maps():
                 directory, _BOAT_FILES.setdefault(world, {}))
         except Exception as e:                     # a save mid-write, say
             print(f"boats for {world}: {e}", flush=True)
+        try:
+            WORLD_CRYPTS[world] = fch.world_crypts(
+                directory, _CRYPT_FILES.setdefault(world, {}))
+        except Exception as e:                     # a save mid-write, say
+            print(f"crypts for {world}: {e}", flush=True)
         try:
             WORLD_CORPSES[world] = fch.world_corpses(
                 directory, _CORPSE_FILES.setdefault(world, {}))
@@ -2935,6 +2943,21 @@ def render_map(requested, shared=None, seeds=None, fog=True,
     # setting -- a toggle that silently turns the others back on is worse
     # than no toggle.
     world_built = WORLD_BUILT.get(pick["label"], [])
+    # A crypt is a place to go back to, so it sits under the boats and
+    # corpses: those are errands, and on a tap they should win.
+    world_crypts = WORLD_CRYPTS.get(pick["label"], [])
+    if world_crypts:
+        span = fch.MAP_SPAN
+        out = []
+        for x, z in world_crypts:
+            left = (x + span) / (2 * span) * 100
+            top = (span - z) / (2 * span) * 100
+            if not 0 <= left <= 100 or not 0 <= top <= 100:
+                continue
+            out.append(
+                f'<b class="pin crypt" data-names="sunken crypt"'
+                f' style="left:{left:.4f}%;top:{top:.4f}%">\u26fc</b>')
+        marks += '<div class="pins">' + "".join(out) + "</div>"
     world_boats = WORLD_BOATS.get(pick["label"], [])
     if world_boats:
         span = fch.MAP_SPAN
@@ -2990,6 +3013,9 @@ def render_map(requested, shared=None, seeds=None, fog=True,
         if by_kind.get(kind):
             rows.append((kind, PIN_GLYPHS.get(kind, "\u25cf"), what,
                          by_kind[kind], True))
+    if world_crypts:
+        rows.append(("crypt", "\u26fc", "sunken crypts", len(world_crypts),
+                     True))
     if world_boats:
         rows.append(("boat", "\u26f5", "boats", len(world_boats), True))
     if world_corpses:
@@ -3138,6 +3164,7 @@ MAP_PAGE = """<!doctype html>
  .maplegend .key.stump{color:#967a54}
  .maplegend .key.corpse{color:#ff8080}
  .maplegend .key.boat{color:#7fd4c8}
+ .maplegend .key.crypt{color:#a8c47a}
  /* What time it is in there. Night reads cold, midday warm, so the colour
     says it before the word does. */
  .phase{font-style:normal;padding:0 .3em;border-radius:3px;font-size:.85em}
@@ -3156,6 +3183,7 @@ MAP_PAGE = """<!doctype html>
  /* What the boxes actually do. Hiding is a class on the plate, so a
     change is one attribute and nothing is redrawn or refetched. */
  .plate.off-boat .pin.boat,
+ .plate.off-crypt .pin.crypt,
  .plate.off-corpse .pin.corpse,
  .plate.off-portals #portals,
  .plate.off-built .built,
@@ -3209,6 +3237,9 @@ MAP_PAGE = """<!doctype html>
  .pin.boat{color:#7fd4c8;font-size:13px}
  /* The one worth spotting from across the map. */
  .pin.boat.longship,.pin.boat.drakkar{color:#ffd98a;font-size:16px}
+ /* Swamp-green, and a size up from the boats: there are a handful in a
+    world and each one is a trip. */
+ .pin.crypt{color:#a8c47a;font-size:15px}
  .pin.corpse{color:#ff8080;font-size:15px;font-weight:700}
  /* Still in the cave, not on the hillside above it. */
  .pin.corpse.indoors{color:#c86868}

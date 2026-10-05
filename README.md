@@ -27,7 +27,8 @@ it loads. Drawing a map means doing the same arithmetic rather than reading a
 picture. Over that goes what your cartography table has shared — the lit part
 above is everywhere the group has been — and the things worth finding again:
 portals and where they lead, each boss altar named, what people have built,
-boats, corpses nobody has fetched, and every stump somebody left.
+the sunken crypts, boats, corpses nobody has fetched, and every stump
+somebody left.
 
 </details>
 

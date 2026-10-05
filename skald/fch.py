@@ -1133,6 +1133,44 @@ def world_boats(directory, cache=None):
                         lambda path: _boats_in(path, pats))
 
 
+# A sunken crypt, found by the iron gate across its entrance. The location
+# itself is not an object in the save -- it is a list of names and places
+# the game keeps elsewhere -- but the gate is, and there is one per crypt.
+# Like everything else here it exists only once the server has generated
+# the ground around it, so these are the crypts somebody has been near.
+CRYPT_GATE = "sunken_crypt_gate"
+
+
+def _crypts_in(path, needle):
+    """The sunken crypts in one chunk: [(x, z)]."""
+    try:
+        with open(path, "rb") as f:
+            blob = f.read()
+    except OSError:
+        return []
+    out = []
+    at = blob.find(needle)
+    while at != -1:
+        if at >= PORTAL_POS_BACK:
+            x, y, z = struct.unpack_from("<3f", blob, at - PORTAL_POS_BACK)
+            # The gate stands at the entrance, on the swamp floor. The inside
+            # is built five thousand metres up, so a match up there is the
+            # crypt's interior or chance, and the entrance is what a map
+            # wants either way.
+            if (-MAP_SPAN < x < MAP_SPAN and -MAP_SPAN < z < MAP_SPAN
+                    and -100.0 < y < 500.0):
+                out.append((x, z))
+        at = blob.find(needle, at + 4)
+    return out
+
+
+def world_crypts(directory, cache=None):
+    """Every sunken crypt the world has generated so far: [(x, z)]."""
+    needle = struct.pack("<i", stable_hash(CRYPT_GATE))
+    return _scan_chunks(directory, cache,
+                        lambda path: _crypts_in(path, needle))
+
+
 # The map texture is square but the world is not. Valheim's ground stops at
 # 10,500 metres from the middle and the rest of the picture is a corner
 # nobody can sail to, so counting it makes every explored figure smaller
