@@ -47,6 +47,7 @@ import gzip
 import hashlib
 import html
 import json
+import math
 import os
 import re
 import struct
@@ -1673,6 +1674,42 @@ def pin_label(name):
     return name.lstrip("$") if name.startswith("$") else name
 
 
+# How near a portal a pin has to be to be that portal's. People zoom right in
+# to place one: on Jotunheim the first two were 0.7 m and 2.4 m from their
+# portals, while at a hub the next portal along stood 5.6 m away.
+PORTAL_PIN_REACH = 5.0
+
+
+def fold_portal_pins(pins, portals, kinds):
+    """The pins that mark portals, taken off the map and given to them.
+
+    Returns the pins still to draw, and portal index -> the names of the
+    pins standing on it. A pin of one of `kinds` with no portal in reach is
+    left where it is: the portal may not be generated yet, or may be gone,
+    and the mark is still somebody's.
+    """
+    if not kinds or not portals:
+        return pins, {}
+    kept, names = [], collections.defaultdict(list)
+    for pin in pins:
+        if PIN_KINDS.get(pin["type"], ("spot",))[0] not in kinds:
+            kept.append(pin)
+            continue
+        name = pin_label(pin["name"])
+        # A portal carrying the pin's own name first, then the nearest: at a
+        # hub the right one and its neighbour can be a few metres apart.
+        near = sorted(
+            (p["name"] != name, d, i)
+            for i, p in enumerate(portals)
+            if (d := math.hypot(p["x"] - pin["x"], p["z"] - pin["z"]))
+            <= PORTAL_PIN_REACH)
+        if not near:
+            kept.append(pin)
+        elif name:
+            names[near[0][2]].append(name)
+    return kept, names
+
+
 def refresh_world_maps():
     """Read each world's cartography table from its own save.
 
@@ -2876,6 +2913,11 @@ def render_map(requested, shared=None, seeds=None, fog=True,
     # a percentage of the plate rather than in pixels, so they follow the
     # zoom without any arithmetic of their own.
     world_pins = WORLD_MAPS.get(pick["label"], {}).get("pins", [])
+    world_portals = WORLD_PORTALS.get(pick["label"], [])
+    # Pins marking portals become part of the portal, so tapping the mark
+    # you placed shows where it leads rather than a second, unrelated dot.
+    world_pins, portal_pins = fold_portal_pins(
+        world_pins, world_portals, CONFIG.portal_pins)
     marks = ""
     if world_pins:
         span = fch.MAP_SPAN
@@ -2905,7 +2947,6 @@ def render_map(requested, shared=None, seeds=None, fog=True,
     # Portals are few and carry names worth reading, so they get their name
     # beside them rather than a tooltip. Two sharing a name are the two ends
     # of one.
-    world_portals = WORLD_PORTALS.get(pick["label"], [])
     if world_portals:
         span = fch.MAP_SPAN
         ends = collections.Counter(p["name"] for p in world_portals if p["name"])
@@ -2915,17 +2956,24 @@ def render_map(requested, shared=None, seeds=None, fog=True,
         # 2.5x and a comfortable gap at 16x, so the grouping is the page's
         # to work out and rework every time the zoom changes.
         holes = []
-        for hole in world_portals:
+        for i, hole in enumerate(world_portals):
             left = (hole["x"] + span) / (2 * span) * 100
             top = (span - hole["z"]) / (2 * span) * 100
             if not 0 <= left <= 100 or not 0 <= top <= 100:
                 continue
             name = hole["name"]
-            holes.append({
-                "x": round(left, 4), "y": round(top, 4),
-                "n": pin_label(name) if name else "",
+            tag = pin_label(name) if name else ""
+            mark = {
+                "x": round(left, 4), "y": round(top, 4), "n": tag,
                 "lone": bool(name) and ends[name] == 1,
-            })
+            }
+            # What its pin calls it, when that says something the tag does
+            # not. Shown only: the game pairs portals by tag alone, so a
+            # pin's name never draws a line.
+            said = [n for n in dict.fromkeys(portal_pins.get(i, ())) if n != tag]
+            if said:
+                mark["p"] = " \u00b7 ".join(said)
+            holes.append(mark)
         marks += ('<svg class="links" id="links" viewBox="0 0 100 100"'
                   ' preserveAspectRatio="none"></svg>'
                   '<div class="pins portals" id="portals" data-portals="'
@@ -3386,7 +3434,13 @@ __BODY__
        // similarly spelt variables is how the label came to be handed an
        // object instead of a string, which threw and left the map bare.
        var names = [];
-       g.all.forEach(function (p) { if (p.n) names.push(p.n); });
+       // A portal's tag, and beside it what a pin placed on it says, when
+       // that is something else. A pin's name alone is enough to call an
+       // untagged portal something.
+       g.all.forEach(function (p) {
+         var said = p.n && p.p ? p.n + ' · ' + p.p : (p.n || p.p);
+         if (said) names.push(said);
+       });
        var unnamed = g.all.length - names.length;
        var lone = (g.all.length === 1 && g.all[0].lone) ? ' lone' : '';
        var count = g.all.length > 1 ? '<em>' + g.all.length + '</em>' : '';

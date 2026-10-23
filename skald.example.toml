@@ -6,6 +6,10 @@
 timezone = "America/Chicago"   # dates, and where a day starts for the charts
 default_world = "Midgard"      # which tab opens first
 
+# Pin kinds your group puts on portals. Those pins are folded into the
+# portal they stand on rather than drawn beside it.
+# portal_pins = ["bed"]
+
 # Where things are. The defaults match the compose example.
 # events_dir   = "/events"     # the log hook's files, one per world
 # data_dir     = "/data"       # Skald's own state

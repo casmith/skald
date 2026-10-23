@@ -43,6 +43,11 @@ DEFAULTS = {
     # mild thing next to the ore, but it is still the map without having
     # earned it, so the person running the server decides.
     "allow_fog_off": True,
+    # The pin kinds someone uses to mark their portals. A pin of one of these
+    # standing on a portal is folded into the portal's marker, so a tap on it
+    # leads to the other end. Empty, because which icon means "portal" is a
+    # habit of one group's, not something the game says.
+    "portal_pins": (),
 }
 
 # setting -> (canonical variable, older aliases that still work)
@@ -63,6 +68,7 @@ ENV = {
     "session_days": ("SKALD_SESSION_DAYS",),
     "show_ores": ("SKALD_SHOW_ORES",),
     "allow_fog_off": ("SKALD_ALLOW_FOG_OFF",),
+    "portal_pins": ("SKALD_PORTAL_PINS",),
 }
 WORLDS_ENV = ("SKALD_WORLDS", "TRACKER_SERVERS")
 # "World=/path/to/log,Other=/path" for people who would rather not write the
@@ -71,6 +77,8 @@ LOGS_ENV = ("SKALD_LOG_FILES",)
 INTS = {"port", "poll_seconds", "save_scan_seconds", "chart_days",
         "merge_gap_seconds", "session_days"}
 BOOLS = {"show_ores", "allow_fog_off"}
+# A list in the file, comma separated in the environment.
+LISTS = {"portal_pins"}
 # What counts as yes in the environment. Anything else, including an empty
 # variable, is no -- so setting it to "false" turns it off rather than on,
 # which is what someone writing that plainly meant.
@@ -100,6 +108,7 @@ class Config:
     session_days: int = DEFAULTS["session_days"]
     show_ores: bool = DEFAULTS["show_ores"]
     allow_fog_off: bool = DEFAULTS["allow_fog_off"]
+    portal_pins: tuple[str, ...] = DEFAULTS["portal_pins"]
     timezone: str = DEFAULTS["timezone"]
     default_world: str = DEFAULTS["default_world"]
     events_dir: str = DEFAULTS["events_dir"]
@@ -190,6 +199,10 @@ def load(path=None, env=None):
         elif key in BOOLS:
             v = values[key]
             values[key] = v if isinstance(v, bool) else str(v).strip().lower() in TRUTHY
+        elif key in LISTS:
+            v = values[key]
+            items = v.split(",") if isinstance(v, str) else v
+            values[key] = tuple(i.strip().lower() for i in items if i.strip())
 
     worlds = tuple(World(**w) for w in data.get("worlds", []))
     if worlds:

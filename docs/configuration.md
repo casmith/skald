@@ -45,6 +45,7 @@ backups_dir = "/mnt/backups/utgard"
 | `session_days` | `SKALD_SESSION_DAYS` | `30` | How long a sign-in lasts |
 | `show_ores` | `SKALD_SHOW_ORES` | off | Show where the ore still is. See below |
 | `allow_fog_off` | `SKALD_ALLOW_FOG_OFF` | on | Whether anyone may take the fog off and see the whole world |
+| `portal_pins` | `SKALD_PORTAL_PINS` | — | Pin kinds your group puts on portals, e.g. `["bed"]`. See below |
 
 A world's `saves_dir` and `backups_dir` override the roots for that world
 alone.
@@ -127,6 +128,23 @@ will not make it for you. Even switched on the layers start unticked.
 A vein is mined in pieces, so a marker means there is something left rather
 than that nobody has touched it, and the map only moves when the world
 saves.
+
+## Pins that mark portals
+
+If your group drops the same icon on every portal it builds, name that
+kind and Skald folds those pins into the portals: a pin of that kind
+within 5 m of a portal is no longer drawn on its own, and tapping the
+portal lists the pin's name beside the portal's tag when the two differ.
+The kinds are `fire`, `house`, `mine`, `spot`, `star`, `bed` and
+`boss`.
+
+```toml
+portal_pins = ["bed"]
+```
+
+or `SKALD_PORTAL_PINS=bed`. A pin with no portal that close stays a pin,
+since the portal may not be generated yet or may be gone. A pin's name
+never links two portals: the game pairs them by tag, so Skald does too.
 
 ## Where a setting came from
 

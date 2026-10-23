@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- **Pins that mark portals fold into them.** Set `portal_pins` to the pin
+  kind your group puts on portals (`SKALD_PORTAL_PINS=bed`, say) and a pin
+  of that kind within 5 m of a portal stops being a second mark beside
+  it. Tapping the portal names the pin too, when its name isn't the
+  portal's tag. Off unless set, since which icon means "portal" is a
+  group's habit, not the game's.
+
 ## 0.25.1
 
 - **The sunken crypts layer starts unticked.** On real worlds it found 56,
