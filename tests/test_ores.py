@@ -81,3 +81,23 @@ def test_nothing_is_read_when_the_switch_is_off(monkeypatch, tmp_path):
     monkeypatch.setattr(app, "CONFIG", config.load(path="/nonexistent", env={}))
     monkeypatch.setattr(app, "WORLD_ORES", {"Jotunheim": {"silver": [(0.0, 0.0)]}})
     assert app.ore_png("Jotunheim", "silver") is None
+
+
+def test_a_giants_brain_is_soft_tissue(tmp_path):
+    """The brain inside a Mistlands skull is mined like a vein and gone once
+    it is, so it is read the same way -- and only the brain counts: the skull
+    outlives it."""
+    path = tmp_path / "d.chunk"
+    path.write_bytes(_chunk([("giant_brain", -332.0, 6955.0),
+                             ("giant_skull", -264.0, 6451.0)]))
+    got = fch._ores_in(str(path), _pats())
+    assert list(got) == ["tissue"]
+    assert [round(v) for v in got["tissue"][0]] == [-332, 6955]
+
+
+def test_every_ore_has_a_layer_and_a_name_people_use():
+    """A deposit with no layer is read and never drawn; the legend says
+    "soft tissue", not the key it is filed under."""
+    from skald import app
+    assert {name for name, _, _ in app.ORE_LAYERS} == set(fch.ORES)
+    assert app.ORE_LABELS["tissue"] == "soft tissue"
