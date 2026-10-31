@@ -908,12 +908,18 @@ def construction_png(points, edge, span=None, night=False):
 
 
 # What is still in the ground, and what it is called in the save. Only the
-# four worth hunting; everything else a pick touches is scenery.
+# ones worth hunting; everything else a pick touches is scenery.
+#
+# Soft tissue is the brain inside a Mistlands giant's skull, not anything in
+# the ground, but it is found and spent the same way: one node per skull,
+# mined with a black metal pick, gone from the save once it is mined out. A
+# skull whose brain is gone is still there, so the skull is no use as a mark.
 ORES = {
     "silver": "silvervein",
     "copper": "rock4_copper",
     "tin": "MineRock_Tin",
     "obsidian": "MineRock_Obsidian",
+    "tissue": "giant_brain",
 }
 
 

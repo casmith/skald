@@ -1663,8 +1663,10 @@ ORE_LAYERS = (
     ("copper", "copper", (214, 132, 78)),
     ("tin", "tin", (90, 96, 120)),
     ("obsidian", "obsidian", (150, 110, 200)),
+    ("tissue", "soft tissue", (226, 120, 150)),
 )
 ORE_COLOURS = {name: colour for name, _, colour in ORE_LAYERS}
+ORE_LABELS = {name: label for name, label, _ in ORE_LAYERS}
 
 
 def pin_label(name):
@@ -3076,7 +3078,7 @@ def render_map(requested, shared=None, seeds=None, fog=True,
         rows.append(("stump", "\u2691", "stumps felled", len(world_stumps),
                      False))
     for ore in world_ores:
-        rows.append((ore, "\u25c6", ore, len(ores[ore]), False))
+        rows.append((ore, "\u25c6", ORE_LABELS[ore], len(ores[ore]), False))
     # At night only the lights are on. Everything else is a label over a
     # photograph of a city, and the point of the view is the glow -- but
     # they are boxes, not decisions, so tick one and it comes back.
@@ -3226,6 +3228,7 @@ MAP_PAGE = """<!doctype html>
  .maplegend .key.copper{color:#d6844e}
  .maplegend .key.tin{color:#9298b4}
  .maplegend .key.obsidian{color:#966ec8}
+ .maplegend .key.tissue{color:#e27896}
  /* The ore sits above the ground and below the fog, like the building:
     you can only have seen a vein somewhere you have been. */
  .ore{image-rendering:pixelated}
@@ -3240,6 +3243,7 @@ MAP_PAGE = """<!doctype html>
  .plate.off-stump .stump,
  .plate.off-silver .ore.silver, .plate.off-copper .ore.copper,
  .plate.off-tin .ore.tin, .plate.off-obsidian .ore.obsidian,
+ .plate.off-tissue .ore.tissue,
  .plate.off-boss .pin.boss, .plate.off-bed .pin.bed,
  .plate.off-mine .pin.mine, .plate.off-house .pin.house,
  .plate.off-fire .pin.fire, .plate.off-star .pin.star,
