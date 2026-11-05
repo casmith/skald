@@ -1,7 +1,14 @@
 # Changelog
 
-## Unreleased
+## 0.26.0
 
+- **Soft tissue on the map.** A fifth ore layer, in pink: the brain inside
+  each Mistlands giant's skull, which is where soft tissue is mined. It
+  behaves like a vein -- one node per skull, gone from the save once it is
+  mined out -- so like the ores it shows what is left, not what was ever
+  there. Behind `SKALD_SHOW_ORES` and unticked, like the rest.
+- The ore legend reads each layer's own label rather than its key, so it
+  says "soft tissue" instead of "tissue".
 - **Pins that mark portals fold into them.** Set `portal_pins` to the pin
   kind your group puts on portals (`SKALD_PORTAL_PINS=bed`, say) and a pin
   of that kind within 5 m of a portal stops being a second mark beside
