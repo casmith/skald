@@ -3118,10 +3118,14 @@ def render_map(requested, shared=None, seeds=None, fog=True,
     felled = (f' &middot; {fmt_n(len(world_stumps))} tree'
               f'{"" if len(world_stumps) == 1 else "s"} felled'
               if world_stumps else "")
+    # The world is a disc, not the square it is drawn in: everything past
+    # its edge is clipped off and left to the sky behind it.
+    rim = fch.WORLD_EDGE / fch.MAP_SPAN * 50
     body = (f'<p class="facts"><b>{label}</b>{when} &middot; {share:.2f}% of the map '
             f'seen{felled} &middot; {where}{seed_line}</p>'
             f'<div class="viewer" id="viewer">'
-            f'<div class="plate{" night" if night else ""}{off_at_first}" id="plate">'
+            f'<div class="plate{" night" if night else ""}{off_at_first}" id="plate"'
+            f' style="--rim:{rim:.4f}%">'
             + terrain
             + (f'<img class="built" src="/built.png?world={pick["key"]}'
                f'{"&night=1" if night else ""}"'
@@ -3176,9 +3180,25 @@ MAP_PAGE = """<!doctype html>
  /* Dragging a map is dragging, not selecting. Without this a pan sweeps
     a blue selection across every pin label and portal name it crosses, and
     the browser tries to drag the terrain image off to somewhere. */
+ /* Behind the world, the sky. It stays put while the world pans, so the
+    disc reads as a thing floating in it rather than a picture on a page. */
  .viewer{position:relative;overflow:hidden;border:1px solid var(--line);
-  border-radius:3px;background:var(--panel);aspect-ratio:1;cursor:grab;
-  touch-action:none;user-select:none;-webkit-user-select:none}
+  border-radius:3px;aspect-ratio:1;cursor:grab;
+  touch-action:none;user-select:none;-webkit-user-select:none;
+  background-color:#05060b;
+  background-image:
+   radial-gradient(1px 1px at 23px 17px,#fffd,transparent),
+   radial-gradient(1px 1px at 71px 94px,#fff9,transparent),
+   radial-gradient(1.5px 1.5px at 132px 41px,#fff,transparent),
+   radial-gradient(1px 1px at 168px 152px,#cfe0ffcc,transparent),
+   radial-gradient(1px 1px at 41px 181px,#ffe9c8aa,transparent),
+   radial-gradient(1px 1px at 19px 63px,#fff8,transparent),
+   radial-gradient(1.5px 1.5px at 97px 12px,#dfe8ffcc,transparent),
+   radial-gradient(1px 1px at 59px 121px,#fffa,transparent),
+   radial-gradient(ellipse at 22% 18%,#1b2244aa,transparent 55%),
+   radial-gradient(ellipse at 80% 78%,#2a1838aa,transparent 50%);
+  background-size:200px 200px,200px 200px,200px 200px,200px 200px,200px 200px,
+   137px 137px,137px 137px,137px 137px,100% 100%,100% 100%}
  .viewer img{-webkit-user-drag:none}
  .viewer:active{cursor:grabbing}
  /* The terrain and the fog are two pictures that arrive separately, and
@@ -3187,10 +3207,18 @@ MAP_PAGE = """<!doctype html>
     until the fog is on it. */
  .plate{position:absolute;inset:0;transform-origin:0 0;visibility:hidden}
  .plate.ready{visibility:visible}
+ /* Only the disc of the world is drawn; the corners of the square are past
+    the edge, where nobody can sail, and showing them says otherwise. */
+ .plate img,.plate .drawing{clip-path:circle(var(--rim,50%) at 50% 50%)}
+ /* A thin glow of atmosphere at the rim, so the edge of the world is an
+    edge rather than where the picture happens to stop. */
+ .plate::before{content:"";position:absolute;inset:calc(50% - var(--rim,50%));
+  border-radius:50%;pointer-events:none;
+  box-shadow:0 0 0 1px #6f8fc455,0 0 24px 4px #4a6fb544}
  /* Shown in place of the terrain while it is being worked out. It sits
     where the picture will be, so the page does not jump when it arrives. */
  .drawing{position:absolute;inset:0;pointer-events:none;display:flex;flex-direction:column;
-   align-items:center;justify-content:center;gap:.6em;padding:2em;
+   align-items:center;justify-content:center;gap:.6em;padding:18%;
    text-align:center;color:#d8cba8;background:#241f1a}
  .drawing b{font-size:1.1em;color:#f3e6c8}
  .drawing span{max-width:34em;font-size:.9em;line-height:1.5;opacity:.85}
