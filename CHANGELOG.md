@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.27.0
+
+- **The map is a world, not a square.** Only the disc you can actually
+  sail -- out to the 10,500 m edge -- is drawn, with a faint glow at its
+  rim, and the corners past the edge give way to a starfield. The fog of
+  war inside the disc is unchanged.
+
 ## 0.26.0
 
 - **Soft tissue on the map.** A fifth ore layer, in pink: the brain inside
