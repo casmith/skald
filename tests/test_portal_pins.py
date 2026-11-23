@@ -156,6 +156,8 @@ Object.defineProperty(portalBox, 'innerHTML',
   {set(v){ markers = v; }, get(){ return markers; }});
 const viewer = mk(), plate = mk();
 viewer.setPointerCapture = () => {};
+// The map sizes itself to the window it is in.
+global.window = {innerHeight: 800, scrollY: 0, addEventListener() {}};
 global.document = {
   getElementById: id => ({portals: portalBox, viewer: viewer,
                           plate: plate}[id] || mk()),

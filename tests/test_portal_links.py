@@ -39,6 +39,8 @@ Object.defineProperty(links, 'innerHTML', {set(v){ drawn = v; }, get(){ return d
 const viewer = mk(), plate = mk();
 viewer.addEventListener = (kind, fn) => { if (kind === 'pointerup') handler = fn; };
 viewer.setPointerCapture = () => {};
+// The map sizes itself to the window it is in.
+global.window = {innerHeight: 800, scrollY: 0, addEventListener() {}};
 global.document = {
   getElementById: id => ({portals: portalBox, links: links, viewer: viewer,
                           plate: plate}[id] || mk()),

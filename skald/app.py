@@ -3242,7 +3242,13 @@ MAP_PAGE = """<!doctype html>
     the browser tries to drag the terrain image off to somewhere. */
  /* Behind the world, the sky. It stays put while the world pans, so the
     disc reads as a thing floating in it rather than a picture on a page. */
+ /* Sized to the window, not just the page: a square as wide as the page is
+    taller than most laptop screens, and the wheel over the map zooms rather
+    than scrolls, so seeing all of it meant hunting for somewhere off the
+    map to scroll from. --fit is the room under the header, worked out by
+    the script below; until it runs, the window's height has to do. */
  .viewer{position:relative;overflow:hidden;border:1px solid var(--line);
+  width:min(100%,var(--fit,calc(100vh - 1.5rem)));margin:0 auto;
   border-radius:3px;aspect-ratio:1;cursor:grab;
   touch-action:none;user-select:none;-webkit-user-select:none;
   background-color:#05060b;
@@ -3785,6 +3791,27 @@ __BODY__
        hideTip();
      });
    }
+   // Fit the map to the room under the header, so all of it is on screen
+   // without scrolling. Measured from the top of the page, not the window,
+   // so scrolling does not change the answer. When there is too little room
+   // -- a phone on its side, where the header alone fills half the screen --
+   // it fills the screen instead, and one scroll brings the whole map in.
+   function fit() {
+     var top = viewer.getBoundingClientRect().top + window.scrollY;
+     var room = window.innerHeight - top - 12;
+     if (room < window.innerHeight * 0.6) room = window.innerHeight - 12;
+     var before = viewer.clientWidth;
+     viewer.style.setProperty('--fit', Math.max(240, Math.floor(room)) + 'px');
+     var after = viewer.clientWidth;
+     // The pan is in pixels, so a resize has to scale it with the map or
+     // the view jumps to somewhere else.
+     if (before && after !== before) {
+       x *= after / before; y *= after / before;
+       clamp(); apply();
+     }
+   }
+   fit();
+   window.addEventListener('resize', fit);
    apply();
  })();
 </script>

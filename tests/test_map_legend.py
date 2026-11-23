@@ -44,6 +44,8 @@ function mk() {
     dataset: {}, set innerHTML(v) {}, get innerHTML() { return ''; }};
 }
 const portalBox = mk(); portalBox.dataset.portals = '[]';
+// The map sizes itself to the window it is in.
+global.window = {innerHeight: 800, scrollY: 0, addEventListener() {}};
 global.document = {
   getElementById: id => ({legend: legend, viewer: viewer, plate: plate,
                           portals: portalBox}[id] || mk()),
