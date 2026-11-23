@@ -2976,7 +2976,13 @@ def render_map(requested, shared=None, seeds=None, fog=True,
         night = night and not topo
         if terrain_png(pick["label"]) is not None:
             src = "topo" if topo else "terrain"
-            terrain = (f'<img class="terrain" src="/{src}.png?world={pick["key"]}"'
+            # The drawing's version is in the address. These are cached for a
+            # week, by the browser and by any CDN in front, and the address
+            # is all a cache knows -- so without it a redrawn world went on
+            # showing the old picture until the week was up.
+            version = worldgen.TOPO_MODEL if topo else worldgen.MODEL
+            terrain = (f'<img class="terrain" src="/{src}.png?world={pick["key"]}'
+                       f'&v={version}"'
                        f' alt="" width="{edge}" height="{edge}">')
         else:
             # Not drawn yet. Say so, rather than embedding an image that is

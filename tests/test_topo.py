@@ -187,7 +187,7 @@ def _page(monkeypatch, has_topo=True, **view):
 
 def test_the_topographic_view_swaps_the_ground(monkeypatch):
     page = _page(monkeypatch, topo=True)
-    assert 'src="/topo.png?world=Midgard"' in page
+    assert f'src="/topo.png?world=Midgard&v={w.TOPO_MODEL}"' in page
     assert "/terrain.png" not in page
     assert re.search(r'class="plate[^"]* topo', page)
     assert "leave topography" in page
@@ -195,7 +195,7 @@ def test_the_topographic_view_swaps_the_ground(monkeypatch):
 
 def test_the_day_view_offers_it(monkeypatch):
     page = _page(monkeypatch)
-    assert 'src="/terrain.png?world=Midgard"' in page
+    assert f'src="/terrain.png?world=Midgard&v={w.MODEL}"' in page
     assert 'href="/map?world=Midgard&topo=1"' in page
 
 
@@ -203,7 +203,7 @@ def test_not_offered_until_it_is_drawn(monkeypatch):
     """A link to a picture that is not coming is a broken link."""
     page = _page(monkeypatch, has_topo=False, topo=True)
     assert "as topography" not in page and "/topo.png" not in page
-    assert 'src="/terrain.png?world=Midgard"' in page
+    assert f'src="/terrain.png?world=Midgard&v={w.MODEL}"' in page
 
 
 def test_one_view_at_a_time(monkeypatch):
@@ -282,3 +282,18 @@ def test_only_the_topographic_view_asks(monkeypatch):
     assert 'data-ground="/height?world=Midgard"' in page
     assert 'id="readout"' in page
     assert "data-ground" not in _page(monkeypatch)
+
+
+def test_a_redrawn_world_has_a_new_address(monkeypatch):
+    """A week's cache, in the browser and in a CDN, keyed on the address:
+    bumping the drawing's version has to change it, or nobody sees the
+    new drawing for a week. That is how 0.29.0 first went out."""
+    before = _page(monkeypatch, topo=True)
+    monkeypatch.setattr(w, "TOPO_MODEL", w.TOPO_MODEL + 1)
+    after = _page(monkeypatch, topo=True)
+    src = re.compile(r'src="(/topo.png[^"]*)"')
+    assert src.search(before).group(1) != src.search(after).group(1)
+    day = _page(monkeypatch)
+    monkeypatch.setattr(w, "MODEL", w.MODEL + 1)
+    assert (re.search(r'src="(/terrain.png[^"]*)"', day).group(1)
+            != re.search(r'src="(/terrain.png[^"]*)"', _page(monkeypatch)).group(1))
