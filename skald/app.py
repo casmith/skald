@@ -3812,6 +3812,12 @@ __BODY__
    }
    fit();
    window.addEventListener('resize', fit);
+   // Measured again once the page has settled. The first measurement is
+   // taken while the web fonts are still loading, and the header grows when
+   // they arrive -- by 25 px on a real world, which left the bottom of the
+   // map hanging off the screen it had been sized to fit.
+   window.addEventListener('load', fit);
+   if (document.fonts && document.fonts.ready) document.fonts.ready.then(fit);
    apply();
  })();
 </script>
