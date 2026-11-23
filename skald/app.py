@@ -1467,33 +1467,12 @@ def terrain_path(world):
     meta = world_metadata(world)
     if not meta:
         return None
-    return os.path.join(
-        DATA_DIR,
-        f"terrain-{meta['seed']}-{TERRAIN_SIZE}-{int(worldgen.MAP_SPAN)}"
-        f"-v{worldgen.MODEL}.png")
-
-
-def topo_path(world):
-    """Where this world's topographic drawing is kept, or None."""
-    meta = world_metadata(world)
-    if not meta:
-        return None
+    # "topo": the name the drawing had while it was a second view beside a
+    # flat one, kept so the worlds already drawn are not drawn again.
     return os.path.join(
         DATA_DIR,
         f"topo-{meta['seed']}-{TERRAIN_SIZE}-{int(worldgen.MAP_SPAN)}"
-        f"-v{worldgen.TOPO_MODEL}.png")
-
-
-def topo_png(world):
-    """The world's topographic drawing, if the worker has made it."""
-    path = topo_path(world)
-    if not path:
-        return None
-    try:
-        with open(path, "rb") as f:
-            return f.read()
-    except OSError:
-        return None
+        f"-v{worldgen.MODEL}.png")
 
 
 # seed -> worldgen.World. Cheap to make, but a hover sends a dozen a second.
@@ -1553,16 +1532,7 @@ def terrain_png(world):
 
 def draw_terrain(world):
     """Draw one world and keep it. Returns True if it is there afterwards."""
-    return _draw(world, terrain_path(world), "render", "", TERRAIN_PROGRESS)
-
-
-def draw_topo(world):
-    """Draw one world's topography and keep it, like draw_terrain."""
-    return _draw(world, topo_path(world), "render_topo", "the topography of ",
-                 {})
-
-
-def _draw(world, path, how, what, progress_into):
+    path = terrain_path(world)
     if not path:
         return False
     with _terrain_lock(path):
@@ -1570,18 +1540,17 @@ def _draw(world, path, how, what, progress_into):
             return True
         meta = world_metadata(world)
         seed = meta["seed"]
-        print(f"drawing {what}{world} from seed {seed}; this happens once",
+        print(f"drawing {world} from seed {seed}; this happens once",
               flush=True)
         started = time.time()
 
         def progress(done, total):
-            progress_into[world] = done / total
+            TERRAIN_PROGRESS[world] = done / total
 
-        progress_into[world] = 0.0
+        TERRAIN_PROGRESS[world] = 0.0
         try:
-            # Looked up by name at call time, so a test can stand in for it.
-            body = getattr(worldgen, how)(worldgen.World(seed), TERRAIN_SIZE,
-                                          progress=progress)
+            body = worldgen.render(worldgen.World(seed), TERRAIN_SIZE,
+                                   progress=progress)
             # Through a temporary name: a half-written file is still a file,
             # and the next reader would serve it as the finished picture.
             with open(path + ".part", "wb") as f:
@@ -1595,8 +1564,8 @@ def _draw(world, path, how, what, progress_into):
                 os.unlink(path + ".part")
             return False
         finally:
-            progress_into.pop(world, None)
-        print(f"drew {what}{world} in {time.time() - started:.0f}s", flush=True)
+            TERRAIN_PROGRESS.pop(world, None)
+        print(f"drew {world} in {time.time() - started:.0f}s", flush=True)
         return True
 
 
@@ -1677,11 +1646,6 @@ def terrain_worker():
     for world in sorted(SERVERS):
         if terrain_png(world) is None:
             draw_terrain(world)
-    # Every world's map before any world's topography: the map is what the
-    # page is for, and the topography is a second way of looking at it.
-    for world in sorted(SERVERS):
-        if topo_png(world) is None:
-            draw_topo(world)
 
 
 # What the game's pin types mean. Only the ones these worlds actually use
@@ -2911,7 +2875,7 @@ __NOTIFY__
 
 
 def render_map(requested, shared=None, seeds=None, fog=True,
-               clocks=None, night=False, topo=False):
+               clocks=None, night=False):
     """The group's map.
 
     Two sources, and the first is far the better one. A world's own save
@@ -2966,23 +2930,22 @@ def render_map(requested, shared=None, seeds=None, fog=True,
         when = (f' &middot; day <b>{day}</b>, {hhmm} '
                 f'<span class="phase {phase}">{phase}</span>')
     seed_line = terrain = ""
-    has_topo = False
+    # Whether there is a picture to point at. `terrain` is not the test:
+    # while the world is being drawn it holds the notice saying so.
+    drawn = False
     if meta:
         seed_line = (f' &middot; seed <b>{html.escape(meta["seed_name"])}</b>'
                      if meta["seed_name"] else f' &middot; seed <b>{meta["seed"]}</b>')
-        has_topo = topo_png(pick["label"]) is not None
-        # One view at a time: the topography by night is neither.
-        topo = topo and has_topo
-        night = night and not topo
-        if terrain_png(pick["label"]) is not None:
-            src = "topo" if topo else "terrain"
+        drawn = terrain_png(pick["label"]) is not None
+        if drawn:
             # The drawing's version is in the address. These are cached for a
             # week, by the browser and by any CDN in front, and the address
             # is all a cache knows -- so without it a redrawn world went on
-            # showing the old picture until the week was up.
-            version = worldgen.TOPO_MODEL if topo else worldgen.MODEL
-            terrain = (f'<img class="terrain" src="/{src}.png?world={pick["key"]}'
-                       f'&v={version}"'
+            # showing the old picture until the week was up. For the same
+            # reason it is /topo.png and not /terrain.png: caches still hold
+            # the retired flat drawing at /terrain.png?v=2.
+            terrain = (f'<img class="terrain" src="/topo.png?world={pick["key"]}'
+                       f'&v={worldgen.MODEL}"'
                        f' alt="" width="{edge}" height="{edge}">')
         else:
             # Not drawn yet. Say so, rather than embedding an image that is
@@ -3187,30 +3150,22 @@ def render_map(requested, shared=None, seeds=None, fog=True,
         legend = f'<div class="maplegend" id="legend">{boxes}</div>'
 
     toggle = (f'<a href="/map?world={pick["key"]}&fog={"0" if fog else "1"}'
-              f'{"&night=1" if night else "&topo=1" if topo else ""}">'
+              f'{"&night=1" if night else ""}">'
               f'{"hide" if fog else "show"} fog of war</a>'
               if pick.get("fog", True) and terrain and CONFIG.allow_fog_off
               else "")
-    keep = "" if fog else "&fog=0"
     if terrain and world_built:
+        keep = "" if fog else "&fog=0"
         toggle += (" &middot; " if toggle else "") + (
             f'<a href="/map?world={pick["key"]}{keep}'
             f'{"" if night else "&night=1"}">'
             f'{"leave night" if night else "see it at night"}</a>')
-    # Offered only once the worker has drawn it. Until then there is nothing
-    # to switch to, and a link to a picture that is not coming is a broken one.
-    if terrain and has_topo:
-        toggle += (" &middot; " if toggle else "") + (
-            f'<a href="/map?world={pick["key"]}{keep}'
-            f'{"" if topo else "&topo=1"}">'
-            f'{"leave topography" if topo else "see it as topography"}</a>')
     note = (" &middot; lit where people have built, brighter where they have "
             "built more" if night else
-            f" &middot; heights from the world seed, a contour every "
-            f"{worldgen.CONTOUR:.0f} m above and below the sea, heavier every "
-            f"{worldgen.INDEX_CONTOUR:.0f} m" if topo else
-            " &middot; terrain drawn from the world seed; the lit part is what "
-            "the group has explored" if terrain else "")
+            f" &middot; terrain drawn from the world seed, a contour every "
+            f"{worldgen.CONTOUR:.0f} m above and below the sea and a heavier one "
+            f"every {worldgen.INDEX_CONTOUR:.0f} m; the lit part is what the "
+            "group has explored" if terrain else "")
     # Nothing records who felled a tree, so this is the world's number and
     # not anybody's -- which is most of what makes it funny.
     felled = (f' &middot; {fmt_n(len(world_stumps))} tree'
@@ -3224,10 +3179,9 @@ def render_map(requested, shared=None, seeds=None, fog=True,
             f'<div class="viewer" id="viewer"'
             + (f' data-ground="/height?world={urllib.parse.quote(pick["key"])}"'
                f' data-span="{worldgen.MAP_SPAN:.0f}"'
-               f' data-rim="{fch.WORLD_EDGE:.0f}"' if topo else "")
+               f' data-rim="{fch.WORLD_EDGE:.0f}"' if drawn else "")
             + '>'
-            f'<div class="plate{" night" if night else ""}'
-            f'{" topo" if topo else ""}{off_at_first}" id="plate"'
+            f'<div class="plate{" night" if night else ""}{off_at_first}" id="plate"'
             f' style="--rim:{rim:.4f}%">'
             + terrain
             + (f'<img class="built" src="/built.png?world={pick["key"]}'
@@ -3246,14 +3200,14 @@ def render_map(requested, shared=None, seeds=None, fog=True,
                if show_fog else "")
             + marks
             + '</div>'
-            + ('<div class="readout" id="readout" hidden></div>' if topo else "")
+            + ('<div class="readout" id="readout" hidden></div>' if drawn else "")
             + '</div>'
             + legend
             + '<p class="facts"><button type="button" data-zoom="-1">&minus;</button> '
             '<button type="button" data-zoom="1">+</button> '
             '<button type="button" data-zoom="0">reset</button>'
             ' &middot; drag to pan, wheel or pinch to zoom'
-            + (", point or tap for the height" if topo else "")
+            + (", point or tap for the height" if drawn else "")
             + (" &middot; " + toggle if toggle else "") + note + '</p>')
     page = MAP_PAGE.replace("__TABS__", tabs).replace("__BODY__", body)
     if meta and terrain_png(pick["label"]) is None:
@@ -3445,7 +3399,7 @@ MAP_PAGE = """<!doctype html>
  /* display:flex above outranks the hidden attribute, which left an empty
     box in the corner of every map until something was tapped. */
  .tip[hidden],.readout[hidden]{display:none}
- /* The height under the pointer, in the topographic view. In a corner
+ /* The height under the pointer. In a corner
     rather than following the cursor, so it does not sit on the very peak
     you are trying to read. */
  .readout{position:absolute;left:8px;bottom:8px;z-index:5;padding:.3em .6em;
@@ -4104,18 +4058,6 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Cache-Control", "no-cache")
             self.end_headers()
             return self.wfile.write(body)
-        if path == "/terrain.png":
-            want = params.get("world", [""])[0]
-            body = terrain_png(want) if want in SERVERS else None
-            if not body:
-                return self._send(404, "no terrain for that world", "text/plain")
-            self.send_response(200)
-            self.send_header("Content-Type", "image/png")
-            self.send_header("Content-Length", str(len(body)))
-            # Terrain cannot change for a seed, so let a browser keep it.
-            self.send_header("Cache-Control", "public, max-age=604800")
-            self.end_headers()
-            return self.wfile.write(body)
         if path == "/height":
             want = params.get("world", [""])[0]
             try:
@@ -4129,10 +4071,9 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, json.dumps(at), "application/json")
         if path == "/topo.png":
             want = params.get("world", [""])[0]
-            body = topo_png(want) if want in SERVERS else None
+            body = terrain_png(want) if want in SERVERS else None
             if not body:
-                return self._send(404, "no topography for that world",
-                                  "text/plain")
+                return self._send(404, "no terrain for that world", "text/plain")
             self.send_response(200)
             self.send_header("Content-Type", "image/png")
             self.send_header("Content-Length", str(len(body)))
@@ -4189,8 +4130,7 @@ class Handler(BaseHTTPRequestHandler):
                                               params.get("fog", ["1"])[0] != "0",
                                               {w: world_clock(h, w, now)
                                                for w in sorted(SERVERS)},
-                                              params.get("night", [""])[0] == "1",
-                                              params.get("topo", [""])[0] == "1"),
+                                              params.get("night", [""])[0] == "1"),
                               "text/html; charset=utf-8")
 
         now = time.time()

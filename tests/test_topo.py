@@ -1,9 +1,9 @@
-"""The topographic view: the same ground, drawn for its shape.
+"""The map's ground, drawn for its shape as well as its biomes.
 
 Each biome in its own colour, lifted with height, the relief shaded from
 the north-west, a contour every
-twenty metres and a heavier one every hundred. A second drawing beside the
-biome map, made by the same worker and never inside a request.
+twenty metres and a heavier one every hundred. It began as a second view
+beside a flat biome map and replaced it.
 """
 import re
 import struct
@@ -27,7 +27,7 @@ def _slope(size, start, per_pixel):
 
 
 def test_it_draws_a_png_of_the_right_size():
-    png = w.render_topo(w.World(849384111), size=24)
+    png = w.render(w.World(849384111), size=24)
     assert png.startswith(b"\x89PNG")
     assert struct.unpack(">IIBB", png[16:26]) == (24, 24, 8, 2)
 
@@ -127,98 +127,67 @@ def test_gentle_ground_keeps_its_light_lines(monkeypatch):
     assert minor_only != _rows(hs, size)
 
 
-# ---- the drawing, kept ---------------------------------------------------
-
-def _world(monkeypatch, tmp_path):
-    monkeypatch.setattr(app, "DATA_DIR", str(tmp_path))
-    monkeypatch.setattr(app, "world_metadata",
-                        lambda world: {"seed": 7, "seed_name": "x", "uid": 1})
-    return "Jotunheim"
-
-
-def test_serving_never_draws(monkeypatch, tmp_path):
-    world = _world(monkeypatch, tmp_path)
-    drew = []
-    monkeypatch.setattr(app.worldgen, "render_topo",
-                        lambda *a, **k: drew.append(1) or b"")
-    assert app.topo_png(world) is None
-    assert drew == []
-
-
-def test_what_the_worker_draws_is_what_is_served(monkeypatch, tmp_path):
-    world = _world(monkeypatch, tmp_path)
-    monkeypatch.setattr(app.worldgen, "render_topo", lambda *a, **k: b"TOPO")
-    assert app.draw_topo(world) is True
-    assert app.topo_png(world) == b"TOPO"
-    # and it is a different file from the map
-    assert app.terrain_png(world) is None
-
-
-def test_every_map_comes_before_any_topography(monkeypatch, tmp_path):
-    _world(monkeypatch, tmp_path)
-    order = []
-    monkeypatch.setattr(app, "SERVERS", {"A": None, "B": None})
-    monkeypatch.setattr(app.worldgen, "render",
-                        lambda world, *a, **k: order.append("map") or b"M")
-    monkeypatch.setattr(app.worldgen, "render_topo",
-                        lambda world, *a, **k: order.append("topo") or b"T")
-    # both worlds share a seed here, so give them their own files
-    monkeypatch.setattr(app, "world_metadata",
-                        lambda world: {"seed": ord(world), "seed_name": "",
-                                       "uid": 1})
-    app.terrain_worker()
-    assert order == ["map", "map", "topo", "topo"]
-
-
 # ---- the page --------------------------------------------------------------
 
-def _page(monkeypatch, has_topo=True, **view):
+def _page(monkeypatch, **view):
     monkeypatch.setattr(app, "WORLD_MAPS", {
         "Midgard": {"edge": 2048, "seen": 1000, "explored": b"", "pins": []}})
     monkeypatch.setattr(app, "WORLD_BUILT", {"Midgard": [(0.0, 0.0, False)]})
     monkeypatch.setattr(app, "terrain_png", lambda world: b"PNG")
-    monkeypatch.setattr(app, "topo_png",
-                        lambda world: b"TOPO" if has_topo else None)
     return app.render_map("Midgard",
                           shared={"Midgard": {"edge": 2048, "seen": 1000}},
                           seeds={"Midgard": {"seed": 1, "seed_name": "x"}},
                           **view)
 
 
-def test_the_topographic_view_swaps_the_ground(monkeypatch):
-    page = _page(monkeypatch, topo=True)
-    assert f'src="/topo.png?world=Midgard&v={w.TOPO_MODEL}"' in page
-    assert "/terrain.png" not in page
-    assert re.search(r'class="plate[^"]* topo', page)
-    assert "leave topography" in page
-
-
-def test_the_day_view_offers_it(monkeypatch):
+def test_the_map_is_drawn_on_the_topography(monkeypatch):
     page = _page(monkeypatch)
-    assert f'src="/terrain.png?world=Midgard&v={w.MODEL}"' in page
-    assert 'href="/map?world=Midgard&topo=1"' in page
+    assert f'src="/topo.png?world=Midgard&v={w.MODEL}"' in page
+    assert "a contour every 20 m" in page
+    # one view, so nothing to switch to
+    assert "topo=1" not in page and "topograph" not in page.lower().split(
+        "<style>")[0]
 
 
-def test_not_offered_until_it_is_drawn(monkeypatch):
-    """A link to a picture that is not coming is a broken link."""
-    page = _page(monkeypatch, has_topo=False, topo=True)
-    assert "as topography" not in page and "/topo.png" not in page
-    assert f'src="/terrain.png?world=Midgard&v={w.MODEL}"' in page
+def test_never_the_retired_flat_address(monkeypatch):
+    """Caches still hold the old flat drawing at /terrain.png?v=2, for a
+    week, and would serve it in place of this one."""
+    assert "/terrain.png" not in _page(monkeypatch)
+    assert "/terrain.png" not in _page(monkeypatch, night=True)
 
 
-def test_one_view_at_a_time(monkeypatch):
-    page = _page(monkeypatch, topo=True, night=True)
+def test_night_is_still_night(monkeypatch):
+    page = _page(monkeypatch, night=True)
     plate = re.search(r'class="plate([^"]*)"', page).group(1)
-    assert "topo" in plate and "night" not in plate
-    assert 'src="/built.png?world=Midgard"' in page
+    assert "night" in plate
+    assert 'src="/built.png?world=Midgard&night=1"' in page
 
 
-def test_the_fog_link_keeps_the_view(monkeypatch):
-    import dataclasses
-    monkeypatch.setattr(app, "CONFIG",
-                        dataclasses.replace(app.CONFIG, allow_fog_off=True))
-    page = _page(monkeypatch, topo=True)
-    assert 'href="/map?world=Midgard&fog=0&topo=1"' in page
+def test_the_map_asks_for_the_height(monkeypatch):
+    page = _page(monkeypatch)
+    assert 'data-ground="/height?world=Midgard"' in page
+    assert 'id="readout"' in page
+    assert "point or tap for the height" in page
+
+
+def test_no_drawing_no_readout(monkeypatch):
+    """While the world is still being drawn there is nothing to point at."""
+    monkeypatch.setattr(app, "WORLD_MAPS", {})
+    monkeypatch.setattr(app, "WORLD_BUILT", {})
+    monkeypatch.setattr(app, "terrain_png", lambda world: None)
+    page = app.render_map("Midgard", shared={},
+                          seeds={"Midgard": {"seed": 1, "seed_name": "x"}})
+    assert "data-ground" not in page and 'id="readout"' not in page
+
+
+def test_a_redrawn_world_has_a_new_address(monkeypatch):
+    """A week's cache, in the browser and in a CDN, keyed on the address:
+    bumping the drawing's version has to change it, or nobody sees the
+    new drawing for a week. That is how 0.29.0 first went out."""
+    src = re.compile(r'src="(/topo.png[^"]*)"')
+    before = src.search(_page(monkeypatch)).group(1)
+    monkeypatch.setattr(w, "MODEL", w.MODEL + 1)
+    assert src.search(_page(monkeypatch)).group(1) != before
 
 
 # ---- the height under the pointer ------------------------------------------
@@ -275,25 +244,3 @@ def test_with_the_fog_liftable_every_point_answers(monkeypatch):
 def test_a_world_with_no_table_has_no_fog_to_keep(monkeypatch):
     _ground(monkeypatch, fog_off=False)
     assert "y" in app.ground_at("Midgard", 0.0, 0.0)
-
-
-def test_only_the_topographic_view_asks(monkeypatch):
-    page = _page(monkeypatch, topo=True)
-    assert 'data-ground="/height?world=Midgard"' in page
-    assert 'id="readout"' in page
-    assert "data-ground" not in _page(monkeypatch)
-
-
-def test_a_redrawn_world_has_a_new_address(monkeypatch):
-    """A week's cache, in the browser and in a CDN, keyed on the address:
-    bumping the drawing's version has to change it, or nobody sees the
-    new drawing for a week. That is how 0.29.0 first went out."""
-    before = _page(monkeypatch, topo=True)
-    monkeypatch.setattr(w, "TOPO_MODEL", w.TOPO_MODEL + 1)
-    after = _page(monkeypatch, topo=True)
-    src = re.compile(r'src="(/topo.png[^"]*)"')
-    assert src.search(before).group(1) != src.search(after).group(1)
-    day = _page(monkeypatch)
-    monkeypatch.setattr(w, "MODEL", w.MODEL + 1)
-    assert (re.search(r'src="(/terrain.png[^"]*)"', day).group(1)
-            != re.search(r'src="(/terrain.png[^"]*)"', _page(monkeypatch)).group(1))

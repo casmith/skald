@@ -6,9 +6,8 @@ megabytes -- it regenerates it on demand from noise seeded by that number.
 Do the same arithmetic and you get the same world, which is what makes a
 real map possible from a save that contains no map.
 
-This is a port of the biome half of it: enough to say what is where, not
-how high it stands. Heights are a second, larger job and a coloured biome
-map does not need them.
+This is a port of enough of it to draw a map: what biome is where, and
+how high the ground stands there.
 
 Three things have to be exactly right or the world is merely plausible:
 
@@ -359,19 +358,13 @@ MAP_SPAN = 2048 * 12 / 2
 # metres, which is why 0.15 keeps turning up as "the shore".
 # Bumped whenever the drawing changes. A seed's terrain cannot change, but
 # our rendering of it can, and the cache is keyed on the seed -- so without
-# this a fix reaches nobody who already has the old picture on disk.
+# this a fix reaches nobody who already has the old picture on disk. It went
+# to 2 with the biome colours; it stays 2 so the drawings already made of
+# that version are kept.
 MODEL = 2
 
 HEIGHT_MULTIPLIER = 200.0
 SEA_LEVEL = 30.0
-
-# The sea, by depth. The biome supplies the hue of dry land; below the
-# shoreline the map fades through these instead, which is what makes a
-# coastline read as a coastline.
-SHORE = (60, 102, 125)
-SHALLOW = (48, 86, 116)
-DEEP = (34, 60, 94)
-
 
 def _mix(a, b, t):
     """`a` at t=0, `b` at t=1."""
@@ -379,67 +372,14 @@ def _mix(a, b, t):
     return tuple(int(round(c + (d - c) * t)) for c, d in zip(a, b, strict=True))
 
 
-def _paint(world, wx, wy, biome, base):
-    """What colour this point is: its biome, then however deep the sea is.
-
-    Swamp is the exception the game makes too. Marsh generates at 27 metres,
-    below the sea by construction, and drawing it blue would put a third of
-    the map's bogs underwater.
-    """
-    if biome == "Swamp":
-        return COLOURS["Swamp"]
-    h = world.height(wx, wy, biome, base)
-    if h >= SEA_LEVEL:
-        return COLOURS[biome]
-    colour = _mix(SHORE, COLOURS[biome], _clamp01(h - SEA_LEVEL + 1.0))
-    colour = _mix(SHALLOW, colour, _clamp01((h - SEA_LEVEL + 2.5) * 0.5))
-    return _mix(DEEP, colour, _clamp01((h - SEA_LEVEL + 12.5) * 0.1))
-
-
-def render(world, size=2048, progress=None):
-    """The world as an RGB PNG, `size` pixels square.
-
-    Slow -- about fifty thousand points a second, each one a dozen noise
-    samples -- and worth caching for ever, because a seed's terrain cannot
-    change. Valheim's own in-game map is 2048 square for this same area, so
-    there is nothing to gain by going finer.
-    """
-    import struct
-    import zlib
-
-    step = 2 * MAP_SPAN / size
-    rows = bytearray()
-    for j in range(size):
-        wy = MAP_SPAN - (j + 0.5) * step
-        rows.append(0)                     # PNG filter: none
-        for i in range(size):
-            wx = -MAP_SPAN + (i + 0.5) * step
-            biome, base = world.sample(wx, wy)
-            rows += bytes(_paint(world, wx, wy, biome, base))
-        if progress and j % 64 == 0:
-            progress(j, size)
-
-    def chunk(kind, body):
-        return (struct.pack(">I", len(body)) + kind + body
-                + struct.pack(">I", zlib.crc32(kind + body) & 0xFFFFFFFF))
-
-    return (b"\x89PNG\r\n\x1a\n"
-            + chunk(b"IHDR", struct.pack(">IIBBBBB", size, size, 8, 2, 0, 0, 0))
-            + chunk(b"IDAT", zlib.compress(bytes(rows), 6))
-            + chunk(b"IEND", b""))
-
-
-# ---- the topographic drawing -------------------------------------------
+# ---- the drawing ---------------------------------------------------------
 #
-# The same ground, drawn for its shape as well as its biomes: each biome in
-# its own colour, lifted a little with height, shaded as if lit from the
+# The ground drawn for its shape as well as its biomes: each biome in its
+# own colour, lifted a little with height, shaded as if lit from the
 # north-west, with a contour every twenty metres and a heavier one every
-# hundred. It needs the true height of every
-# pixel, which is the same minutes of noise the biome map costs, so it is a
-# second drawing kept beside the first rather than a filter over it.
-
-# Bumped whenever the topographic drawing changes, like MODEL above.
-TOPO_MODEL = 2
+# hundred. It needs the true height of every pixel. A flat map coloured by
+# biome alone came first; this replaced it, being the same colours with the
+# shape of the land added.
 
 CONTOUR = 20.0            # metres between contour lines
 INDEX_CONTOUR = 100.0     # every fifth line, drawn heavier
@@ -580,10 +520,13 @@ def topo_rows(hs, biomes, size):
     return bytes(rows)
 
 
-def render_topo(world, size=2048, progress=None):
-    """The world as a topographic RGB PNG, `size` pixels square.
+def render(world, size=2048, progress=None):
+    """The world as an RGB PNG, `size` pixels square.
 
-    As slow as render(), for the same reason, and cached the same way.
+    Slow -- about fifty thousand points a second, each one a dozen noise
+    samples -- and worth caching for ever, because a seed's terrain cannot
+    change. Valheim's own in-game map is 2048 square for this same area, so
+    there is nothing to gain by going finer.
     """
     hs, biomes = heights(world, size, progress)
     return _png(topo_rows(hs, biomes, size), size)
