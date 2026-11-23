@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.28.0
+
+- **A topographic view of the map.** Beside day and night, "see it as
+  topography" draws the same world for its shape: ground tinted by
+  height, shaded from the north-west, a contour every 20 m above and below
+  the sea and a heavier one every 100 m. It is drawn once per world in the
+  background, after every world's map, and offered once it is ready --
+  a few more minutes of one core per world, the first time.
+- The fog of war link keeps the view you are in.
+
 ## 0.27.0
 
 - **The map is a world, not a square.** Only the disc you can actually
