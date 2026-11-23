@@ -431,14 +431,15 @@ def render(world, size=2048, progress=None):
 
 # ---- the topographic drawing -------------------------------------------
 #
-# The same ground, drawn for its shape instead of its biomes: tinted by
-# height, shaded as if lit from the north-west, with a contour every twenty
-# metres and a heavier one every hundred. It needs the true height of every
+# The same ground, drawn for its shape as well as its biomes: each biome in
+# its own colour, lifted a little with height, shaded as if lit from the
+# north-west, with a contour every twenty metres and a heavier one every
+# hundred. It needs the true height of every
 # pixel, which is the same minutes of noise the biome map costs, so it is a
 # second drawing kept beside the first rather than a filter over it.
 
 # Bumped whenever the topographic drawing changes, like MODEL above.
-TOPO_MODEL = 1
+TOPO_MODEL = 2
 
 CONTOUR = 20.0            # metres between contour lines
 INDEX_CONTOUR = 100.0     # every fifth line, drawn heavier
@@ -447,17 +448,15 @@ INDEX_CONTOUR = 100.0     # every fifth line, drawn heavier
 RELIEF = 3.0
 PIXEL_METRES = 2 * MAP_SPAN / 2048
 
-# Height above the sea, in metres, to colour: lowland green through tan and
-# brown to bare rock and snow. Chosen to read as a printed map, not a game.
-LAND_RAMP = ((0.0, (172, 196, 140)), (20.0, (196, 206, 150)),
-             (50.0, (214, 204, 154)), (100.0, (204, 170, 122)),
-             (170.0, (170, 128, 96)), (250.0, (196, 186, 180)),
-             (330.0, (244, 244, 246)))
+# Land keeps its biome's colour, so a mountain is still white and a swamp
+# still brown, and height only lifts it: darker at the shore, paler towards
+# this many metres above the sea. The shading and the contours carry the
+# shape; the colour says where you are.
+HIGH = 250.0
 # Depth below the sea, in metres.
 SEA_RAMP = ((0.0, (178, 214, 226)), (5.0, (150, 196, 218)),
             (20.0, (112, 164, 204)), (60.0, (78, 128, 180)),
             (200.0, (52, 92, 148)))
-MARSH = (150, 152, 112)
 COAST = (40, 70, 100)
 
 
@@ -471,7 +470,8 @@ def _ramp(stops, v):
 
 
 def heights(world, size=2048, progress=None):
-    """The ground's height at every pixel, and which pixels are marsh.
+    """The ground's height at every pixel, and which biome it is in, as an
+    index into BIOMES.
 
     Pixels past the edge of the world are not worked out -- the page clips
     them away -- and are given the depth the edge falls to.
@@ -481,7 +481,8 @@ def heights(world, size=2048, progress=None):
     step = 2 * MAP_SPAN / size
     reach = (WATER_EDGE + 2 * step) ** 2
     hs = array("f", bytes(4 * size * size))
-    marsh = bytearray(size * size)
+    biomes = bytearray([BIOMES.index("Ocean")]) * (size * size)
+    index = {b: i for i, b in enumerate(BIOMES)}
     for j in range(size):
         wy = MAP_SPAN - (j + 0.5) * step
         row = j * size
@@ -492,15 +493,19 @@ def heights(world, size=2048, progress=None):
                 continue
             biome, base = world.sample(wx, wy)
             hs[row + i] = world.height(wx, wy, biome, base)
-            if biome == "Swamp":
-                marsh[row + i] = 1
+            biomes[row + i] = index[biome]
         if progress and j % 64 == 0:
             progress(j, size)
-    return hs, marsh
+    return hs, biomes
 
 
-def topo_rows(hs, marsh, size):
+def topo_rows(hs, biomes, size):
     """Raw PNG scanlines for the topographic drawing of these heights."""
+    swamp = BIOMES.index("Swamp")
+    marsh = bytes(b == swamp for b in biomes)
+    # Each biome's colour from the shore to HIGH, worked out once.
+    tints = [(_mix(COLOURS[b], (0, 0, 0), 0.18),
+              _mix(COLOURS[b], (255, 255, 255), 0.22)) for b in BIOMES]
     # Light from the north-west, 45 degrees up: the convention every printed
     # relief map uses, and the one that makes hills read as hills rather
     # than as valleys.
@@ -542,7 +547,8 @@ def topo_rows(hs, marsh, size):
                 colour = _ramp(SEA_RAMP, -a)
                 light = 1.0 + (light - 1.0) * 0.3
             else:
-                colour = MARSH if bog else _ramp(LAND_RAMP, a)
+                low, high = tints[biomes[row + i]]
+                colour = _mix(low, high, a / HIGH)
             colour = tuple(min(255, int(c * light)) for c in colour)
 
             # A line where this pixel and the one east or south of it fall
@@ -579,8 +585,8 @@ def render_topo(world, size=2048, progress=None):
 
     As slow as render(), for the same reason, and cached the same way.
     """
-    hs, marsh = heights(world, size, progress)
-    return _png(topo_rows(hs, marsh, size), size)
+    hs, biomes = heights(world, size, progress)
+    return _png(topo_rows(hs, biomes, size), size)
 
 
 def _png(rows, size):

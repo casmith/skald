@@ -1,6 +1,7 @@
 """The topographic view: the same ground, drawn for its shape.
 
-Heights tinted, the relief shaded from the north-west, a contour every
+Each biome in its own colour, lifted with height, the relief shaded from
+the north-west, a contour every
 twenty metres and a heavier one every hundred. A second drawing beside the
 biome map, made by the same worker and never inside a request.
 """
@@ -12,8 +13,9 @@ from skald import app
 from skald import worldgen as w
 
 
-def _rows(hs, size, marsh=None):
-    raw = w.topo_rows(array("f", hs), marsh or bytearray(size * size), size)
+def _rows(hs, size, biome="Meadows"):
+    biomes = bytearray([w.BIOMES.index(biome)]) * (size * size)
+    raw = w.topo_rows(array("f", hs), biomes, size)
     stride = 1 + 3 * size
     return [[tuple(raw[j * stride + 1 + 3 * i:j * stride + 4 + 3 * i])
              for i in range(size)] for j in range(size)]
@@ -78,9 +80,29 @@ def test_marsh_is_bog_not_water():
     size = 8
     hs = [w.SEA_LEVEL - 2.6] * (size * size)
     wet = _rows(hs, size)[4][4]
-    bog = _rows(hs, size, bytearray([1] * size * size))[4][4]
+    bog = _rows(hs, size, "Swamp")[4][4]
     assert wet[2] > wet[0]                # blue
     assert bog != wet and bog[2] < bog[1]  # green-brown
+
+
+def test_each_biome_keeps_its_colour():
+    """A mountain is still white and a swamp still brown: the colour says
+    where you are, and the shading and contours say how high."""
+    size = 8
+    flat = [w.SEA_LEVEL + 60.0] * (size * size)
+    mountain = _rows(flat, size, "Mountain")[4][4]
+    forest = _rows(flat, size, "BlackForest")[4][4]
+    ash = _rows(flat, size, "AshLands")[4][4]
+    assert min(mountain) > 180                    # pale
+    assert forest[1] > forest[0] and forest[1] > forest[2]   # green
+    assert ash[0] > ash[1] and ash[0] > ash[2]    # red
+
+
+def test_higher_ground_is_paler_within_a_biome():
+    size = 8
+    low = _rows([w.SEA_LEVEL + 5.0] * 64, size, "Meadows")[4][4]
+    high = _rows([w.SEA_LEVEL + 200.0] * 64, size, "Meadows")[4][4]
+    assert sum(high) > sum(low)
 
 
 def test_cliffs_keep_only_their_heavy_lines(monkeypatch):
@@ -180,7 +202,7 @@ def test_the_day_view_offers_it(monkeypatch):
 def test_not_offered_until_it_is_drawn(monkeypatch):
     """A link to a picture that is not coming is a broken link."""
     page = _page(monkeypatch, has_topo=False, topo=True)
-    assert "topograph" not in page
+    assert "as topography" not in page and "/topo.png" not in page
     assert 'src="/terrain.png?world=Midgard"' in page
 
 
@@ -197,3 +219,66 @@ def test_the_fog_link_keeps_the_view(monkeypatch):
                         dataclasses.replace(app.CONFIG, allow_fog_off=True))
     page = _page(monkeypatch, topo=True)
     assert 'href="/map?world=Midgard&fog=0&topo=1"' in page
+
+
+# ---- the height under the pointer ------------------------------------------
+
+def _ground(monkeypatch, fog_off, explored=None, edge=8):
+    import dataclasses
+    monkeypatch.setattr(app, "world_metadata",
+                        lambda world: {"seed": 849384111, "seed_name": "",
+                                       "uid": 1})
+    monkeypatch.setattr(app, "CONFIG",
+                        dataclasses.replace(app.CONFIG, allow_fog_off=fog_off))
+    maps = {}
+    if explored is not None:
+        maps["Midgard"] = {"edge": edge, "explored": explored}
+    monkeypatch.setattr(app, "WORLD_MAPS", maps)
+
+
+def test_the_height_is_the_seeds_own_at_that_exact_point(monkeypatch):
+    """Not the drawing's 12 m pixel: the point itself, which is what finding
+    the top of a peak needs."""
+    _ground(monkeypatch, fog_off=True)
+    gen = w.World(849384111)
+    for x, z in ((0.0, 0.0), (1234.5, -2210.25), (-4000.0, 3999.9)):
+        got = app.ground_at("Midgard", x, z)
+        biome, base = gen.sample(x, z)
+        h = gen.height(x, z, biome, base)
+        assert got["y"] == round(h, 1)
+        assert got["above"] == round(h - w.SEA_LEVEL, 1)
+        assert got["biome"] == app.BIOME_NAMES.get(biome, biome)
+
+
+def test_off_the_map_is_nothing(monkeypatch):
+    _ground(monkeypatch, fog_off=True)
+    assert app.ground_at("Midgard", w.MAP_SPAN + 1, 0.0) is None
+    assert app.ground_at("Midgard", float("nan"), 0.0) is None
+
+
+def test_the_fog_keeps_its_secrets_when_it_cannot_be_lifted(monkeypatch):
+    """A height and a biome are exactly what the fog is there to hold back.
+    An 8-pixel map with only its top-left pixel explored."""
+    explored = bytes([1]) + bytes(7)
+    _ground(monkeypatch, fog_off=False, explored=explored)
+    span = w.MAP_SPAN
+    seen = app.ground_at("Midgard", -span + 10, span - 10)
+    assert "y" in seen
+    assert app.ground_at("Midgard", 0.0, 0.0) == {"unexplored": True}
+
+
+def test_with_the_fog_liftable_every_point_answers(monkeypatch):
+    _ground(monkeypatch, fog_off=True, explored=bytes(8))
+    assert "y" in app.ground_at("Midgard", 0.0, 0.0)
+
+
+def test_a_world_with_no_table_has_no_fog_to_keep(monkeypatch):
+    _ground(monkeypatch, fog_off=False)
+    assert "y" in app.ground_at("Midgard", 0.0, 0.0)
+
+
+def test_only_the_topographic_view_asks(monkeypatch):
+    page = _page(monkeypatch, topo=True)
+    assert 'data-ground="/height?world=Midgard"' in page
+    assert 'id="readout"' in page
+    assert "data-ground" not in _page(monkeypatch)
