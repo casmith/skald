@@ -30,6 +30,8 @@ const plate = stub();
 const viewer = stub();
 viewer.addEventListener = (name, fn) => { handlers[name] = fn; };
 const portalBox = stub(); portalBox.dataset.portals = '[]';
+// The map sizes itself to the window it is in.
+global.window = {innerHeight: 800, scrollY: 0, addEventListener() {}};
 global.document = {
   getElementById: id => ({viewer: viewer, plate: plate, portals: portalBox}[id] || stub()),
   querySelectorAll: () => [], createElement: () => stub(),

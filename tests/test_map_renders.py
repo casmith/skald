@@ -32,6 +32,8 @@ const stub = () => ({style: {setProperty(){}, transform: ''}, className: '',
   getBoundingClientRect: () => ({left:0, top:0, width:10, height:10, bottom:10}),
   clientWidth: %d, offsetWidth: 50, offsetHeight: 20});
 const viewer = stub(), plate = stub();
+// The map sizes itself to the window it is in.
+global.window = {innerHeight: 800, scrollY: 0, addEventListener() {}};
 global.document = {
   getElementById: id => id === 'portals' ? box : (id === 'viewer' ? viewer : plate),
   querySelectorAll: () => [], createElement: () => stub()};
