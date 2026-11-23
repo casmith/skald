@@ -1496,6 +1496,43 @@ def topo_png(world):
         return None
 
 
+# seed -> worldgen.World. Cheap to make, but a hover sends a dozen a second.
+_GROUND = {}
+BIOME_NAMES = {"BlackForest": "Black Forest", "AshLands": "Ashlands",
+               "DeepNorth": "Deep North"}
+
+
+def ground_at(world, x, z):
+    """How high the ground stands at one point, worked out from the seed.
+
+    Exact to the point rather than to the 12 m pixel the drawing has, which
+    is what makes it any use for finding the top of a peak. None if the
+    world's seed is unknown or the point is off the map; {"unexplored":
+    True} if the fog hides it and the server will not lift the fog -- a
+    height and a biome are exactly what the fog is there to keep back.
+    """
+    meta = world_metadata(world)
+    span = worldgen.MAP_SPAN
+    if not meta or not (abs(x) <= span and abs(z) <= span):
+        return None
+    shared = WORLD_MAPS.get(world)
+    if shared and not CONFIG.allow_fog_off:
+        edge = shared["edge"]
+        px = min(edge - 1, int((x + span) / (2 * span) * edge))
+        py = min(edge - 1, int((span - z) / (2 * span) * edge))
+        bits = shared["explored"]
+        at = py * ((edge + 7) // 8) + px // 8
+        if at >= len(bits) or not bits[at] >> (px & 7) & 1:
+            return {"unexplored": True}
+    gen = _GROUND.get(meta["seed"])
+    if gen is None:
+        gen = _GROUND[meta["seed"]] = worldgen.World(meta["seed"])
+    biome, base = gen.sample(x, z)
+    h = gen.height(x, z, biome, base)
+    return {"y": round(h, 1), "above": round(h - worldgen.SEA_LEVEL, 1),
+            "biome": BIOME_NAMES.get(biome, biome)}
+
+
 def terrain_png(world):
     """The world's drawing, if it has already been made.
 
@@ -3178,7 +3215,11 @@ def render_map(requested, shared=None, seeds=None, fog=True,
     rim = fch.WORLD_EDGE / fch.MAP_SPAN * 50
     body = (f'<p class="facts"><b>{label}</b>{when} &middot; {share:.2f}% of the map '
             f'seen{felled} &middot; {where}{seed_line}</p>'
-            f'<div class="viewer" id="viewer">'
+            f'<div class="viewer" id="viewer"'
+            + (f' data-ground="/height?world={urllib.parse.quote(pick["key"])}"'
+               f' data-span="{worldgen.MAP_SPAN:.0f}"'
+               f' data-rim="{fch.WORLD_EDGE:.0f}"' if topo else "")
+            + '>'
             f'<div class="plate{" night" if night else ""}'
             f'{" topo" if topo else ""}{off_at_first}" id="plate"'
             f' style="--rim:{rim:.4f}%">'
@@ -3198,12 +3239,15 @@ def render_map(requested, shared=None, seeds=None, fog=True,
               f' alt="Explored map of {label}" width="{edge}" height="{edge}">'
                if show_fog else "")
             + marks
-            + '</div></div>'
+            + '</div>'
+            + ('<div class="readout" id="readout" hidden></div>' if topo else "")
+            + '</div>'
             + legend
             + '<p class="facts"><button type="button" data-zoom="-1">&minus;</button> '
             '<button type="button" data-zoom="1">+</button> '
             '<button type="button" data-zoom="0">reset</button>'
             ' &middot; drag to pan, wheel or pinch to zoom'
+            + (", point or tap for the height" if topo else "")
             + (" &middot; " + toggle if toggle else "") + note + '</p>')
     page = MAP_PAGE.replace("__TABS__", tabs).replace("__BODY__", body)
     if meta and terrain_png(pick["label"]) is None:
@@ -3392,6 +3436,17 @@ MAP_PAGE = """<!doctype html>
    box-shadow:0 4px 14px #0009;font-size:12px;line-height:1.45;
    color:#f3e6c8;pointer-events:none}
  .tip span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+ /* display:flex above outranks the hidden attribute, which left an empty
+    box in the corner of every map until something was tapped. */
+ .tip[hidden],.readout[hidden]{display:none}
+ /* The height under the pointer, in the topographic view. In a corner
+    rather than following the cursor, so it does not sit on the very peak
+    you are trying to read. */
+ .readout{position:absolute;left:8px;bottom:8px;z-index:5;padding:.3em .6em;
+   border-radius:6px;background:#17130fdd;border:1px solid #6b5a44;
+   font-size:12px;color:#f3e6c8;pointer-events:none;
+   font-variant-numeric:tabular-nums}
+ .readout b{color:var(--gold);font-weight:700}
  .pin.portal.lone{color:#8d7aa8}
  .pin.portal.lone i{color:#b8abc8}
  /* The building sits over the ground and under the fog: people can only
@@ -3617,7 +3672,12 @@ __BODY__
        clamp(); apply(); hideTip();
        return;
      }
-     if (!dragging) return;
+     if (!dragging) {
+       if (pointers.size === 0 && e.pointerType === 'mouse') {
+         ground(e.clientX, e.clientY);
+       }
+       return;
+     }
      moved += Math.abs(e.clientX - lastX) + Math.abs(e.clientY - lastY);
      x += e.clientX - lastX; y += e.clientY - lastY;
      lastX = e.clientX; lastY = e.clientY;
@@ -3650,7 +3710,11 @@ __BODY__
      while (el && el !== plate && !(el.dataset && el.dataset.names)) {
        el = el.parentElement;
      }
-     if (!el || !el.dataset || !el.dataset.names) return hideTip();
+     if (!el || !el.dataset || !el.dataset.names) {
+       // Bare ground. A phone has no hover, so a tap is how it asks.
+       ground(cx, cy);
+       return hideTip();
+     }
      drawLinks(el.dataset.g);
      var names = el.dataset.names.split('\\n');
      tip.innerHTML = '';
@@ -3670,6 +3734,49 @@ __BODY__
      tip.style.left = left + 'px';
      tip.style.top = top + 'px';
    }
+   // The height under the pointer, asked of the server: it works the ground
+   // out from the seed exactly where you point, not to the 12 m pixel of
+   // the picture. One question in flight at a time; anything asked while
+   // waiting replaces what was waiting, so a fast sweep sends a handful
+   // of requests rather than hundreds and the answer is for where the
+   // pointer is now.
+   var readout = document.getElementById('readout');
+   var asking = false, waiting = null;
+   function ground(cx, cy) {
+     if (!readout) return;
+     var r = plate.getBoundingClientRect(), span = +viewer.dataset.span;
+     var wx = ((cx - r.left) / r.width * 2 - 1) * span;
+     var wz = (1 - (cy - r.top) / r.height * 2) * span;
+     if (Math.hypot(wx, wz) > +viewer.dataset.rim) {
+       readout.hidden = true; waiting = null; return;
+     }
+     waiting = [wx, wz];
+     if (!asking) ask();
+   }
+   function ask() {
+     var p = waiting;
+     waiting = null;
+     asking = true;
+     fetch(viewer.dataset.ground + '&x=' + p[0].toFixed(1)
+           + '&z=' + p[1].toFixed(1))
+       .then(function (r) { return r.ok ? r.json() : null; })
+       .then(function (d) {
+         if (!d) { readout.hidden = true; return; }
+         readout.innerHTML = d.unexplored ? 'unexplored'
+           : '<b>' + Math.round(d.y) + ' m</b> &middot; '
+             + (d.above >= 0 ? Math.round(d.above) + ' m above'
+                             : Math.round(-d.above) + ' m below')
+             + ' the sea &middot; ' + esc(d.biome);
+         readout.hidden = false;
+       })
+       .catch(function () {})
+       .then(function () { asking = false; if (waiting) ask(); });
+   }
+   viewer.addEventListener('pointerleave', function (e) {
+     if (readout && e.pointerType === 'mouse') {
+       readout.hidden = true; waiting = null;
+     }
+   });
    function hideTip() {
      tip.hidden = true;
      if (links) links.innerHTML = '';
@@ -4003,6 +4110,17 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Cache-Control", "public, max-age=604800")
             self.end_headers()
             return self.wfile.write(body)
+        if path == "/height":
+            want = params.get("world", [""])[0]
+            try:
+                x = float(params.get("x", [""])[0])
+                z = float(params.get("z", [""])[0])
+            except ValueError:
+                return self._send(400, "x and z, in metres", "text/plain")
+            at = ground_at(want, x, z) if want in SERVERS else None
+            if at is None:
+                return self._send(404, "no ground there", "text/plain")
+            return self._send(200, json.dumps(at), "application/json")
         if path == "/topo.png":
             want = params.get("world", [""])[0]
             body = topo_png(want) if want in SERVERS else None
