@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.30.0
+
+- **The topography is the map.** The map's ground is now the shaded,
+  contoured drawing, in each biome's own colour, rather than a choice
+  between it and a flat one. Point at it (or tap it) anywhere and the
+  corner says how high the ground stands. Night view is unchanged.
+- The "see it as topography" link is gone; there is nothing to switch to.
+  Worlds already drawn are not drawn again.
+
 ## 0.29.1
 
 - **The new topography actually shows.** The map's images are cached for
