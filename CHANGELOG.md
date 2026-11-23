@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.31.1
+
+- **The map really fits the window.** 0.31.0 measured the room for it
+  before the page's fonts had loaded, and the header grows when they
+  arrive, so the bottom of the map could still sit just off the screen. It
+  measures again once they are in.
+
 ## 0.31.0
 
 - **The map fits the window.** It is sized to the room under the header,
