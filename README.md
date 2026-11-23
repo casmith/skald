@@ -103,6 +103,9 @@ server](#trying-it-without-a-server).)*
 - **A group map on real terrain**: the world drawn from its own seed, with
   your cartography table laid over it. Nothing is uploaded — it is read from
   the save the server already writes.
+- **The shape of the land**: each biome in its own colour, shaded, with a
+  contour every 20 m — and point at any spot (or tap it) to read how high
+  the ground stands there, worked out from the seed to the metre.
 - **Layers on that map**, each a checkbox: pins split by kind, each boss
   named at its own altar, portals with a line to the other end when you tap
   one, where people have built, corpses nobody has fetched (including the
