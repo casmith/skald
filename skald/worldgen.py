@@ -28,6 +28,7 @@ Three things have to be exactly right or the world is merely plausible:
 Ported from the Rust implementation at github.com/aritropaul/vegvisr, whose
 notes on those precision traps saved this from being subtly wrong.
 """
+import itertools
 import math
 
 from skald.perm import PERM
@@ -425,4 +426,172 @@ def render(world, size=2048, progress=None):
     return (b"\x89PNG\r\n\x1a\n"
             + chunk(b"IHDR", struct.pack(">IIBBBBB", size, size, 8, 2, 0, 0, 0))
             + chunk(b"IDAT", zlib.compress(bytes(rows), 6))
+            + chunk(b"IEND", b""))
+
+
+# ---- the topographic drawing -------------------------------------------
+#
+# The same ground, drawn for its shape instead of its biomes: tinted by
+# height, shaded as if lit from the north-west, with a contour every twenty
+# metres and a heavier one every hundred. It needs the true height of every
+# pixel, which is the same minutes of noise the biome map costs, so it is a
+# second drawing kept beside the first rather than a filter over it.
+
+# Bumped whenever the topographic drawing changes, like MODEL above.
+TOPO_MODEL = 1
+
+CONTOUR = 20.0            # metres between contour lines
+INDEX_CONTOUR = 100.0     # every fifth line, drawn heavier
+# A pixel is twelve metres, which flattens everything; without exaggerating
+# the relief the shading would barely show outside the mountains.
+RELIEF = 3.0
+PIXEL_METRES = 2 * MAP_SPAN / 2048
+
+# Height above the sea, in metres, to colour: lowland green through tan and
+# brown to bare rock and snow. Chosen to read as a printed map, not a game.
+LAND_RAMP = ((0.0, (172, 196, 140)), (20.0, (196, 206, 150)),
+             (50.0, (214, 204, 154)), (100.0, (204, 170, 122)),
+             (170.0, (170, 128, 96)), (250.0, (196, 186, 180)),
+             (330.0, (244, 244, 246)))
+# Depth below the sea, in metres.
+SEA_RAMP = ((0.0, (178, 214, 226)), (5.0, (150, 196, 218)),
+            (20.0, (112, 164, 204)), (60.0, (78, 128, 180)),
+            (200.0, (52, 92, 148)))
+MARSH = (150, 152, 112)
+COAST = (40, 70, 100)
+
+
+def _ramp(stops, v):
+    if v <= stops[0][0]:
+        return stops[0][1]
+    for (lo, a), (hi, b) in itertools.pairwise(stops):
+        if v <= hi:
+            return _mix(a, b, (v - lo) / (hi - lo))
+    return stops[-1][1]
+
+
+def heights(world, size=2048, progress=None):
+    """The ground's height at every pixel, and which pixels are marsh.
+
+    Pixels past the edge of the world are not worked out -- the page clips
+    them away -- and are given the depth the edge falls to.
+    """
+    from array import array
+
+    step = 2 * MAP_SPAN / size
+    reach = (WATER_EDGE + 2 * step) ** 2
+    hs = array("f", bytes(4 * size * size))
+    marsh = bytearray(size * size)
+    for j in range(size):
+        wy = MAP_SPAN - (j + 0.5) * step
+        row = j * size
+        for i in range(size):
+            wx = -MAP_SPAN + (i + 0.5) * step
+            if wx * wx + wy * wy > reach:
+                hs[row + i] = -2.0 * HEIGHT_MULTIPLIER
+                continue
+            biome, base = world.sample(wx, wy)
+            hs[row + i] = world.height(wx, wy, biome, base)
+            if biome == "Swamp":
+                marsh[row + i] = 1
+        if progress and j % 64 == 0:
+            progress(j, size)
+    return hs, marsh
+
+
+def topo_rows(hs, marsh, size):
+    """Raw PNG scanlines for the topographic drawing of these heights."""
+    # Light from the north-west, 45 degrees up: the convention every printed
+    # relief map uses, and the one that makes hills read as hills rather
+    # than as valleys.
+    lx, ly, lz = -0.5, 0.5, math.sqrt(0.5)
+    metres = PIXEL_METRES * (2048 / size)
+    rows = bytearray()
+    last = size - 1
+    for j in range(size):
+        rows.append(0)
+        up, down = max(j - 1, 0) * size, min(j + 1, last) * size
+        row = j * size
+        below = min(j + 1, last) * size
+        for i in range(size):
+            h = hs[row + i]
+            east = hs[row + min(i + 1, last)]
+            west = hs[row + max(i - 1, 0)]
+            dx = (east - west) / (2 * metres)
+            dn = (hs[up + i] - hs[down + i]) / (2 * metres)
+            nx, ny = -dx * RELIEF, -dn * RELIEF
+            shade = (nx * lx + ny * ly + lz) / math.sqrt(nx * nx + ny * ny + 1.0)
+            light = min(1.25, max(0.3, 0.3 + 0.7 * shade / lz))
+
+            bog = marsh[row + i]
+            # Marsh sits a little under the sea by construction; it is bog,
+            # not water, as the biome map also has it.
+            lift = SEA_LEVEL + 0.5 if bog else -1e9
+            a = max(h, lift) - SEA_LEVEL
+            r = max(east, lift if marsh[row + min(i + 1, last)] else -1e9) - SEA_LEVEL
+            d = max(hs[below + i], lift if marsh[below + i] else -1e9) - SEA_LEVEL
+            # The coast is drawn on the land, whichever side the sea is on,
+            # so it looks to all four neighbours and not just two.
+            wet = a >= 0.0 and not bog and min(
+                west, hs[up + i], east, hs[below + i]) < SEA_LEVEL and any(
+                hs[k] < SEA_LEVEL and not marsh[k]
+                for k in (row + max(i - 1, 0), up + i,
+                          row + min(i + 1, last), below + i))
+
+            if a < 0.0:
+                colour = _ramp(SEA_RAMP, -a)
+                light = 1.0 + (light - 1.0) * 0.3
+            else:
+                colour = MARSH if bog else _ramp(LAND_RAMP, a)
+            colour = tuple(min(255, int(c * light)) for c in colour)
+
+            # A line where this pixel and the one east or south of it fall
+            # either side of a contour. Drawn on one side only, so a line is
+            # one pixel wide rather than two.
+            if wet:
+                colour = COAST
+            elif (a >= 0.0) != (r >= 0.0) or (a >= 0.0) != (d >= 0.0):
+                pass
+            else:
+                k = math.floor(a / CONTOUR)
+                if k != math.floor(r / CONTOUR) or k != math.floor(d / CONTOUR):
+                    heavy = (math.floor(a / INDEX_CONTOUR)
+                             != math.floor(r / INDEX_CONTOUR)
+                             or math.floor(a / INDEX_CONTOUR)
+                             != math.floor(d / INDEX_CONTOUR))
+                    slope = math.hypot(dx, dn)
+                    spacing = CONTOUR / (slope * metres) if slope else 1e9
+                    if a < 0.0:
+                        dim = 0.88 if heavy else 0.94
+                    elif heavy:
+                        dim = 0.55
+                    else:
+                        # On a cliff the lines would run together into a
+                        # dark smear; there only the heavy ones are kept.
+                        dim = 0.75 if spacing >= 2.5 else 1.0
+                    colour = tuple(int(c * dim) for c in colour)
+            rows += bytes(colour)
+    return bytes(rows)
+
+
+def render_topo(world, size=2048, progress=None):
+    """The world as a topographic RGB PNG, `size` pixels square.
+
+    As slow as render(), for the same reason, and cached the same way.
+    """
+    hs, marsh = heights(world, size, progress)
+    return _png(topo_rows(hs, marsh, size), size)
+
+
+def _png(rows, size):
+    import struct
+    import zlib
+
+    def chunk(kind, body):
+        return (struct.pack(">I", len(body)) + kind + body
+                + struct.pack(">I", zlib.crc32(kind + body) & 0xFFFFFFFF))
+
+    return (b"\x89PNG\r\n\x1a\n"
+            + chunk(b"IHDR", struct.pack(">IIBBBBB", size, size, 8, 2, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(rows, 6))
             + chunk(b"IEND", b""))
