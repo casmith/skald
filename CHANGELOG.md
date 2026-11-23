@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.29.1
+
+- **The new topography actually shows.** The map's images are cached for
+  a week, and 0.29.0's redrawn topography went on showing the old drawing
+  from that cache. Their addresses now carry the drawing's version, so a
+  redrawn world is fetched fresh.
+
 ## 0.29.0
 
 - **Topography in biome colours.** The topographic view keeps each
