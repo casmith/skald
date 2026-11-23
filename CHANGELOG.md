@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.29.0
+
+- **Topography in biome colours.** The topographic view keeps each
+  biome's own colour -- mountains white and grey, swamps brown, the forest
+  dark green -- paler with height, with the shading and contours over it.
+  Each world's topography is drawn again once, in the background.
+- **The height under the pointer.** In the topographic view, point at the
+  map (or tap it on a phone) and the corner says how high the ground is,
+  how far above the sea, and which biome. Worked out from the seed at that
+  exact point, so it finds the top of a peak, though it knows nothing of
+  ground people have raised or dug. Where the fog of war cannot be lifted,
+  ground under it says only "unexplored".
+- The map no longer shows an empty box in its top-left corner before
+  anything has been tapped.
+
 ## 0.28.0
 
 - **A topographic view of the map.** Beside day and night, "see it as
