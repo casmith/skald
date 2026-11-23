@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.31.0
+
+- **The map fits the window.** It is sized to the room under the header,
+  so all of it is on screen without scrolling, and the space beside it is
+  free to scroll the page from. A phone held upright is unchanged; on its
+  side the map fills the screen's height. Resizing the window keeps the
+  view where it was.
+
 ## 0.30.0
 
 - **The topography is the map.** The map's ground is now the shaded,
