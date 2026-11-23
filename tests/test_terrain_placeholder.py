@@ -79,9 +79,12 @@ def test_the_worker_skips_worlds_that_are_done(monkeypatch, tmp_path):
     world = _world(monkeypatch, tmp_path)
     monkeypatch.setattr(app, "SERVERS", {world: object()})
     monkeypatch.setattr(app.worldgen, "render", lambda *a, **k: b"ONCE")
+    monkeypatch.setattr(app.worldgen, "render_topo", lambda *a, **k: b"ONCE")
     app.terrain_worker()
     calls = []
     monkeypatch.setattr(app.worldgen, "render",
+                        lambda *a, **k: calls.append(1) or b"AGAIN")
+    monkeypatch.setattr(app.worldgen, "render_topo",
                         lambda *a, **k: calls.append(1) or b"AGAIN")
     app.terrain_worker()
     assert calls == []
