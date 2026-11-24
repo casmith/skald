@@ -1715,6 +1715,47 @@ def pin_label(name):
     return name.lstrip("$") if name.startswith("$") else name
 
 
+def portal_pairs(portals):
+    """Which portals lead to which: a key per portal, shared with the
+    portal(s) it leads to, or None for one that leads nowhere.
+
+    The save says, for every portal the game has connected: two portals
+    carrying the same link are the two ends. That is the answer whenever it
+    is there -- four portals tagged XP1 are two pairs, and the tag cannot
+    say which two.
+
+    A portal without one is either too new for the game to have paired yet
+    (it does so every few seconds) or has nobody free to pair with. Those
+    are matched by tag among themselves, as the game is about to: two
+    sharing a tag are a pair, and three or more each lead to one of the
+    others, which is all that can honestly be drawn. A portal whose link
+    has no partner in what was read goes with them, rather than nowhere.
+    Untagged portals pair with each other too, but only by link: without
+    one, guessing between them is guessing.
+    """
+    by_link = collections.defaultdict(list)
+    for i, p in enumerate(portals):
+        if p.get("link") is not None:
+            by_link[p["link"]].append(i)
+    keys = [None] * len(portals)
+    n = 0
+    for ends in by_link.values():
+        if len(ends) == 2:
+            for i in ends:
+                keys[i] = n
+            n += 1
+    by_name = collections.defaultdict(list)
+    for i, p in enumerate(portals):
+        if keys[i] is None and p["name"]:
+            by_name[p["name"]].append(i)
+    for ends in by_name.values():
+        if len(ends) >= 2:
+            for i in ends:
+                keys[i] = n
+            n += 1
+    return keys
+
+
 # How near a portal a pin has to be to be that portal's. People zoom right in
 # to place one: on Jotunheim the first two were 0.7 m and 2.4 m from their
 # portals, while at a hub the next portal along stood 5.6 m away.
@@ -2997,11 +3038,10 @@ def render_map(requested, shared=None, seeds=None, fog=True,
                 f' style="left:{left:.4f}%;top:{top:.4f}%"{title}>{body}</b>')
         marks = '<div class="pins">' + "".join(out) + "</div>"
     # Portals are few and carry names worth reading, so they get their name
-    # beside them rather than a tooltip. Two sharing a name are the two ends
-    # of one.
+    # beside them rather than a tooltip. Which leads where is portal_pairs'.
     if world_portals:
         span = fch.MAP_SPAN
-        ends = collections.Counter(p["name"] for p in world_portals if p["name"])
+        pairs = portal_pairs(world_portals)
         # Handed over as data rather than as markers, because where one
         # marker stops and the next begins depends on how far in you are.
         # Two portals twenty metres apart are four screen pixels apart at
@@ -3015,13 +3055,15 @@ def render_map(requested, shared=None, seeds=None, fog=True,
                 continue
             name = hole["name"]
             tag = pin_label(name) if name else ""
-            mark = {
-                "x": round(left, 4), "y": round(top, 4), "n": tag,
-                "lone": bool(name) and ends[name] == 1,
-            }
+            mark = {"x": round(left, 4), "y": round(top, 4), "n": tag}
+            if pairs[i] is not None:
+                mark["k"] = pairs[i]
+            elif name:
+                # Named, so it is meant to lead somewhere, and does not.
+                mark["lone"] = True
             # What its pin calls it, when that says something the tag does
-            # not. Shown only: the game pairs portals by tag alone, so a
-            # pin's name never draws a line.
+            # not. Shown only: the game pairs portals by tag and saves
+            # the pair, so a pin's name never draws a line.
             said = [n for n in dict.fromkeys(portal_pins.get(i, ())) if n != tag]
             if said:
                 mark["p"] = " \u00b7 ".join(said)
@@ -3778,21 +3820,20 @@ __BODY__
      if (links) links.innerHTML = '';
    }
 
-   // Where this marker's portals lead. Valheim stores no link between the
-   // two ends -- the save holds a tag and nothing else, and the game pairs
-   // them by it at run time -- so the tag is the pairing, and on these
-   // worlds no tag is used more than twice, which makes it exact rather
-   // than a guess.
+   // Where this marker's portals lead. The page is told which portals
+   // are the ends of one (the k they share, read from the save), not just
+   // their tags: four portals tagged XP1 are two pairs, and a line to every
+   // XP1 points at two places the portal does not go.
    function drawLinks(gi) {
      if (!links) return;
      links.innerHTML = '';
      var group = shown[+gi];
      if (!group) return;
      var wanted = {};
-     group.all.forEach(function (p) { if (p.n) wanted[p.n] = true; });
+     group.all.forEach(function (p) { if (p.k !== undefined) wanted[p.k] = true; });
      var drawn = {}, out = '';
      portalData.forEach(function (h) {
-       if (!h.n || !wanted[h.n]) return;
+       if (h.k === undefined || !wanted[h.k]) return;
        var other = whereOf[h.i];
        if (other === undefined || other === +gi || drawn[other]) return;
        drawn[other] = true;

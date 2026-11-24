@@ -1,10 +1,11 @@
 """Lines between the two ends of a portal.
 
-Valheim stores no link. A portal's record in the save holds a tag, a
-creator and sometimes a health, and that is all -- there is no reference to
-the other end, because the game pairs them by tag when it loads. So the tag
-is the pairing, and on these worlds no tag is used more than twice, which
-makes it exact rather than a guess.
+The page is told which portals are the ends of one -- a key they share,
+worked out from the links in the save (see test_portal_pairs) -- and draws
+by that, not by tag. This file used to say the save held no link and that
+the tag was exact because no tag was used more than twice. Both were wrong:
+Jotunheim has four portals tagged XP1, which are two pairs, and a tap on
+one drew lines to all three of the others.
 """
 import json
 import re
@@ -63,12 +64,18 @@ def _tap(portals, group, tmp_path):
     return json.loads(done.stdout)
 
 
-def _p(name, x, y):
-    return {"n": name, "x": x, "y": y, "lone": False}
+def _p(name, x, y, k=None):
+    out = {"n": name, "x": x, "y": y}
+    if k is None:
+        out["lone"] = True
+    else:
+        out["k"] = k
+    return out
 
 
 def test_tapping_one_end_draws_a_line_to_the_other(tmp_path):
-    out = _tap([_p("Haldor", 10.0, 10.0), _p("Haldor", 80.0, 80.0)], 0, tmp_path)
+    out = _tap([_p("Haldor", 10.0, 10.0, 0), _p("Haldor", 80.0, 80.0, 0)], 0,
+               tmp_path)
     assert out["lines"] == 1
     assert 'x1="10.000"' in out["raw"] and 'x2="80.000"' in out["raw"]
 
@@ -80,10 +87,27 @@ def test_a_lone_end_draws_nothing(tmp_path):
     assert out["lines"] == 0
 
 
+def test_four_portals_with_one_tag_are_two_pairs(tmp_path):
+    """The case reported: four XP1s, and a tap on one drew a line to every
+    other XP1. It goes to one place, so it gets one line."""
+    portals = [_p("XP1", 10.0, 10.0, 0), _p("XP1", 80.0, 80.0, 1),
+               _p("XP1", 20.0, 70.0, 0), _p("XP1", 70.0, 20.0, 1)]
+    out = _tap(portals, 0, tmp_path)
+    assert out["lines"] == 1
+    assert 'x2="20.000"' in out["raw"] and 'y2="70.000"' in out["raw"]
+
+
+def test_an_untagged_pair_is_still_a_pair(tmp_path):
+    """The game pairs untagged portals with each other too, and the save
+    says which."""
+    out = _tap([_p("", 10.0, 10.0, 3), _p("", 80.0, 80.0, 3)], 0, tmp_path)
+    assert out["lines"] == 1
+
+
 def test_a_huddle_draws_a_line_for_every_tag_under_it(tmp_path):
     """Tapping a hub should reach everywhere that hub goes, not one place."""
-    portals = [_p("A", 50.0, 50.0), _p("B", 50.02, 50.02),
-               _p("A", 10.0, 90.0), _p("B", 90.0, 10.0)]
+    portals = [_p("A", 50.0, 50.0, 0), _p("B", 50.02, 50.02, 1),
+               _p("A", 10.0, 90.0, 0), _p("B", 90.0, 10.0, 1)]
     out = _tap(portals, 0, tmp_path)
     assert out["lines"] == 2
 
@@ -91,5 +115,5 @@ def test_a_huddle_draws_a_line_for_every_tag_under_it(tmp_path):
 def test_no_line_back_to_the_marker_itself(tmp_path):
     """Both ends inside one huddle is one marker; a line to itself is a
     dot, and worse, a lie about where it goes."""
-    out = _tap([_p("A", 50.0, 50.0), _p("A", 50.02, 50.02)], 0, tmp_path)
+    out = _tap([_p("A", 50.0, 50.0, 0), _p("A", 50.02, 50.02, 0)], 0, tmp_path)
     assert out["lines"] == 0
