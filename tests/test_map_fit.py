@@ -99,3 +99,38 @@ def test_without_room_it_fills_the_screen(tmp_path):
       on.resize.forEach(fn => fn());
     """, tmp_path)
     assert fits[-1] == "378px"
+
+
+# ---- what sits where ---------------------------------------------------------
+
+def _page(monkeypatch):
+    from skald import app
+    monkeypatch.setattr(app, "WORLD_MAPS", {
+        "Midgard": {"edge": 2048, "seen": 1000, "explored": b"", "pins": []}})
+    monkeypatch.setattr(app, "WORLD_BUILT", {"Midgard": [(0.0, 0.0, False)]})
+    monkeypatch.setattr(app, "terrain_png", lambda world: b"PNG")
+    return app.render_map("Midgard",
+                          shared={"Midgard": {"edge": 2048, "seen": 1000}},
+                          seeds={"Midgard": {"seed": 1, "seed_name": "x"}})
+
+
+def test_the_key_sits_beside_the_map_not_under_it(monkeypatch):
+    """Under it, the key and the notes pushed the controls a screen below
+    a map sized to fill the window."""
+    page = _page(monkeypatch)
+    stage = re.search(r'<div class="stage">(.*)</aside></div>', page, re.S)
+    assert stage, "no stage"
+    viewer, side = stage.group(1).split('<aside class="side">')
+    assert 'id="viewer"' in viewer and 'id="legend"' not in viewer
+    assert 'id="legend"' in side and 'data-zoom="0"' in side
+    # the world's facts lead the panel, still the page's first facts line
+    assert side.startswith('<p class="facts">')
+
+
+def test_the_header_is_one_row(monkeypatch):
+    """Every line above the map is taken off its size."""
+    page = _page(monkeypatch)
+    head = re.search(r'<header class="top">(.*?)</header>', page, re.S).group(1)
+    assert "<h1>" in head and 'class="tabs"' in head and 'href="/"' in head
+    between = page.split("</header>")[1].split('<div class="stage">')[0]
+    assert between.strip() == ""

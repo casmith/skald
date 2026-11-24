@@ -3174,9 +3174,10 @@ def render_map(requested, shared=None, seeds=None, fog=True,
     # The world is a disc, not the square it is drawn in: everything past
     # its edge is clipped off and left to the sky behind it.
     rim = fch.WORLD_EDGE / fch.MAP_SPAN * 50
-    body = (f'<p class="facts"><b>{label}</b>{when} &middot; {share:.2f}% of the map '
-            f'seen{felled} &middot; {where}{seed_line}</p>'
-            f'<div class="viewer" id="viewer"'
+    facts = (f'<p class="facts"><b>{label}</b>{when} &middot; {share:.2f}% of the map '
+             f'seen{felled} &middot; {where}{seed_line}</p>')
+    body = ('<div class="stage">'
+            '<div class="viewer" id="viewer"'
             + (f' data-ground="/height?world={urllib.parse.quote(pick["key"])}"'
                f' data-span="{worldgen.MAP_SPAN:.0f}"'
                f' data-rim="{fch.WORLD_EDGE:.0f}"' if drawn else "")
@@ -3202,13 +3203,15 @@ def render_map(requested, shared=None, seeds=None, fog=True,
             + '</div>'
             + ('<div class="readout" id="readout" hidden></div>' if drawn else "")
             + '</div>'
+            + '<aside class="side">' + facts
             + legend
-            + '<p class="facts"><button type="button" data-zoom="-1">&minus;</button> '
+            + '<p class="facts how"><button type="button" data-zoom="-1">&minus;</button> '
             '<button type="button" data-zoom="1">+</button> '
             '<button type="button" data-zoom="0">reset</button>'
             ' &middot; drag to pan, wheel or pinch to zoom'
             + (", point or tap for the height" if drawn else "")
-            + (" &middot; " + toggle if toggle else "") + note + '</p>')
+            + (" &middot; " + toggle if toggle else "") + note + '</p>'
+            + '</aside></div>')
     page = MAP_PAGE.replace("__TABS__", tabs).replace("__BODY__", body)
     if meta and terrain_png(pick["label"]) is None:
         page = page.replace("<head>",
@@ -3225,9 +3228,19 @@ MAP_PAGE = """<!doctype html>
 <style>
  :root{color-scheme:dark;--bg:#0e0b08;--panel:#1c1610;--line:#3b2e20;--bronze:#8a6a3f;
   --gold:#e8b25a;--gold-dim:#cfa266;--fg:#eadcc0;--muted:#a8977a}
- body{font:15px/1.5 'Averia Serif Libre',Georgia,serif;margin:0 auto;max-width:62rem;
-  padding:1.75rem 1rem 3rem;color:var(--fg);background:var(--bg)}
- h1{font:700 1.6rem 'Cinzel',Georgia,serif;color:var(--gold);letter-spacing:.06em;margin:0 0 .2rem}
+ /* Wider than the dashboard: the map and its key sit side by side, and
+    the map is as tall as the window allows. */
+ body{font:15px/1.5 'Averia Serif Libre',Georgia,serif;margin:0 auto;max-width:86rem;
+  width:fit-content;padding:.8rem 1rem 3rem;color:var(--fg);background:var(--bg)}
+ h1{font:700 1.4rem 'Cinzel',Georgia,serif;color:var(--gold);letter-spacing:.06em;margin:0}
+ /* One row of header, so the map can start as high up the window as it
+    can: every pixel above it is a pixel off its size. */
+ .top{display:flex;flex-wrap:wrap;align-items:center;gap:.4rem 1rem;margin:0 0 .6rem}
+ .top .tabs{margin:0;flex:1}
+ .top .back{font-size:.85rem;white-space:nowrap}
+ /* The page is as wide as the map and its key; the closing words wrap to
+    that rather than widening it. */
+ .foot{font-size:.85rem;width:0;min-width:100%}
  a{color:var(--gold)} .muted,.facts{color:var(--muted)} .facts{font-size:.85rem;margin:.4rem 0 .8rem}
  .facts b{color:var(--gold-dim);font-weight:400}
  .tabs{display:flex;flex-wrap:wrap;gap:.4rem;margin:.8rem 0}
@@ -3247,8 +3260,15 @@ MAP_PAGE = """<!doctype html>
     than scrolls, so seeing all of it meant hunting for somewhere off the
     map to scroll from. --fit is the room under the header, worked out by
     the script below; until it runs, the window's height has to do. */
+ /* The map and the panel beside it. The map takes what is left after the
+    panel, up to the height --fit allows; on a narrow or upright screen
+    the panel drops underneath instead. */
+ .stage{display:flex;gap:1rem;align-items:flex-start;justify-content:center}
+ .side{flex:0 0 15rem;min-width:0}
+ .side .facts{margin:0 0 .6rem}
+ .side .facts.how{margin:.6rem 0 0}
  .viewer{position:relative;overflow:hidden;border:1px solid var(--line);
-  width:min(100%,var(--fit,calc(100vh - 1.5rem)));margin:0 auto;
+  flex:0 1 auto;width:var(--fit,calc(100vh - 1.5rem));min-width:0;
   border-radius:3px;aspect-ratio:1;cursor:grab;
   touch-action:none;user-select:none;-webkit-user-select:none;
   background-color:#05060b;
@@ -3292,7 +3312,7 @@ MAP_PAGE = """<!doctype html>
  /* The legend. Checkboxes rather than links: a link reloads the page and
     throws away where you had scrolled and zoomed to, which is most of what
     you were looking at. */
- .maplegend{display:flex;flex-wrap:wrap;gap:.35rem .9rem;margin:.6rem 0 0;
+ .maplegend{display:flex;flex-direction:column;gap:.2rem;margin:0;
    padding:.55rem .7rem;border:1px solid #3a3027;border-radius:8px;
    background:#1b1712;font-size:.8rem}
  .maplegend label{display:flex;align-items:center;gap:.35rem;cursor:pointer;
@@ -3437,13 +3457,23 @@ MAP_PAGE = """<!doctype html>
  button:hover{border-color:var(--bronze);color:var(--gold)}
  .empty{background:var(--panel);border:1px solid var(--line);border-radius:3px;
   padding:.9rem 1rem;color:var(--muted)}
+ /* Too narrow for a panel beside the map, or taller than wide (where width,
+    not height, is what limits the map): the panel goes underneath and the
+    key lies in rows again. */
+ @media (max-width:48rem),(max-aspect-ratio:1/1){
+  body{width:auto}
+  .stage{flex-direction:column;align-items:stretch}
+  .viewer{flex:none;width:min(100%,var(--fit,calc(100vh - 1.5rem)));margin:0 auto}
+  .side{flex:none}
+  .side .facts:first-child{margin-top:.6rem}
+  .maplegend{flex-direction:row;flex-wrap:wrap;gap:.35rem .9rem}
+ }
 </style></head><body>
-<h1>The map</h1>
-<p class="muted">Everywhere the group has been, from its own cartography
- table &middot; <a href="/">back to the dashboard</a></p>
+<header class="top"><h1>The map</h1>
 <nav class="tabs">__TABS__</nav>
+<a class="back" href="/">back to the dashboard</a></header>
 __BODY__
-<p class="muted" style="font-size:.85rem">A world&rsquo;s map comes from its own
+<p class="muted foot">A world&rsquo;s map comes from its own
  cartography table, read from the save Skald already has: everything anyone has shared to
  it, kept current by the game. Nothing is uploaded and nothing leaves the server.</p>
 <script>
