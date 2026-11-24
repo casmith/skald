@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.32.1
+
+- **A portal's line goes where the portal goes.** Tapping a portal drew a
+  line to every portal with the same tag, so four portals tagged XP1 showed
+  three lines each. The game saves which two portals it paired, and the map
+  now draws that one line. Untagged pairs get their line too.
+
 ## 0.32.0
 
 - **A bigger map, with its key beside it.** The map page's header is one
