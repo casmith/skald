@@ -144,7 +144,8 @@ portal_pins = ["bed"]
 
 or `SKALD_PORTAL_PINS=bed`. A pin with no portal that close stays a pin,
 since the portal may not be generated yet or may be gone. A pin's name
-never links two portals: the game pairs them by tag, so Skald does too.
+never links two portals: the game pairs them by tag and saves which two
+it paired, and Skald draws what it saved.
 
 ## Where a setting came from
 

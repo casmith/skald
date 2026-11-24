@@ -590,11 +590,49 @@ PORTAL_POS_BACK = 12
 MAX_PORTALS = 4000
 PORTAL_TAG_MAX = 120
 
+# Which portal a portal leads to. The game pairs portals by tag, but only
+# once: every few seconds the server takes each portal with no partner and
+# joins it to a random free one with the same tag, and from then on that
+# pair is fixed and saved. So four portals tagged XP1 are two pairs, and
+# which two is in the save, not in the tags.
+#
+# The object's flags are the two bytes before its position. If the lowest
+# bit is set, a connection follows the prefab hash -- after the rotation, two
+# bytes, when bit 0x1000 says there is one -- as a type byte and a 32-bit
+# number. The number is shared by the two ends; the type is PORTAL on one
+# end and PORTAL | TARGET on the other. Worked out from a real world's
+# chunks, where every one of 86 connected portals had exactly one partner,
+# always carrying the same tag.
+PORTAL_FLAGS_BACK = PORTAL_POS_BACK + 2
+FLAG_CONNECTION = 0x0001
+FLAG_ROTATION = 0x1000
+ROTATION_SIZE = 2
+CONNECTION_PORTAL = 0x01
+CONNECTION_TARGET = 0x10
+
+
+def _portal_link(blob, start):
+    """The number this portal shares with the one it leads to, or None."""
+    if start < PORTAL_FLAGS_BACK:
+        return None
+    flags = struct.unpack_from("<H", blob, start - PORTAL_FLAGS_BACK)[0]
+    if not flags & FLAG_CONNECTION:
+        return None
+    at = start + 4 + (ROTATION_SIZE if flags & FLAG_ROTATION else 0)
+    if at + 5 > len(blob):
+        return None
+    # Anything but a portal connection means this is not the shape we know,
+    # and a wrong link is worse than none: the tag is still there to go by.
+    if blob[at] & ~CONNECTION_TARGET != CONNECTION_PORTAL:
+        return None
+    return struct.unpack_from("<I", blob, at + 1)[0]
+
 
 def _portals_in(path):
     """Every portal in one chunk file, or None if it holds none.
 
-    Returns [{"name", "x", "y", "z"}].
+    Returns [{"name", "x", "y", "z", "link"}]; "link" is the number the
+    portal shares with its partner, or None when the save names none.
     """
     try:
         with open(path, "rb") as f:
@@ -636,7 +674,8 @@ def _portals_in(path):
                     name = text
             except (Bad, struct.error, UnicodeDecodeError):
                 name = ""
-        found.append({"name": name, "x": x, "y": y, "z": z})
+        found.append({"name": name, "x": x, "y": y, "z": z,
+                      "link": _portal_link(blob, start)})
     return found
 
 
@@ -646,7 +685,8 @@ def world_portals(directory, cache=None):
     Portals are ordinary world objects rather than map data, so they are not
     where the cartography table is -- but they are in the same saves Skald
     already reads, and a portal with a name on it is the most useful label a
-    map can carry. Two portals sharing a name are the two ends of one.
+    map can carry. Which two are the ends of one is saved with them; see
+    _portal_link.
     """
     return _scan_chunks(directory, cache, _portals_in)
 
