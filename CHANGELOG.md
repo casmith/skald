@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.32.0
+
+- **A bigger map, with its key beside it.** The map page's header is one
+  row, and the world's facts, the key and the controls sit in a panel to
+  the right of the map instead of underneath it, so the map has the
+  window's full height to fill. On a phone held upright the panel is
+  under the map, as before.
+
 ## 0.31.1
 
 - **The map really fits the window.** 0.31.0 measured the room for it
