@@ -1646,6 +1646,13 @@ def terrain_worker():
     for world in sorted(SERVERS):
         if terrain_png(world) is None:
             draw_terrain(world)
+    # Then lay out each world's rivers, which a drawing already on disk did
+    # not need this run, so the first hover over the map does not spend
+    # seconds on them.
+    for world in sorted(SERVERS):
+        meta = world_metadata(world)
+        if meta:
+            _ = worldgen.World(meta["seed"]).rivers
 
 
 # What the game's pin types mean. Only the ones these worlds actually use

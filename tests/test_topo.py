@@ -74,15 +74,18 @@ def test_the_coast_is_a_line_on_the_land_side_whichever_way_it_faces():
         assert rows[water][4] != w.COAST
 
 
-def test_marsh_is_bog_not_water():
-    """Marsh generates under the sea by construction, as the biome map also
-    knows; painting it blue would drown every swamp."""
+def test_the_water_is_drawn_where_the_games_map_draws_it():
+    """Two and a half metres under the sea, in every biome. Marsh ground,
+    just under the sea by construction, stays bog; a river cut through the
+    swamp, deeper, is water. Drawing water at sea level drowned every swamp,
+    and exempting swamp from it hid the rivers that run through them."""
     size = 8
-    hs = [w.SEA_LEVEL - 2.6] * (size * size)
-    wet = _rows(hs, size)[4][4]
-    bog = _rows(hs, size, "Swamp")[4][4]
-    assert wet[2] > wet[0]                # blue
-    assert bog != wet and bog[2] < bog[1]  # green-brown
+    bog = _rows([w.SEA_LEVEL - 2.0] * (size * size), size, "Swamp")[4][4]
+    river = _rows([w.SEA_LEVEL - 5.0] * (size * size), size, "Swamp")[4][4]
+    shallow = _rows([w.SEA_LEVEL - 2.0] * (size * size), size)[4][4]
+    assert bog[2] < bog[1]                 # green-brown
+    assert river[2] > river[0]             # blue
+    assert shallow[2] < shallow[1]         # land too, outside a swamp
 
 
 def test_each_biome_keeps_its_colour():
