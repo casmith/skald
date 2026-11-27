@@ -29,6 +29,8 @@ notes on those precision traps saved this from being subtly wrong.
 """
 import itertools
 import math
+import struct
+import threading
 
 from skald.perm import PERM
 
@@ -114,6 +116,16 @@ class Random:
             return lo
         return (lo - r % (hi - lo)) if hi < lo else (lo + r % (hi - lo))
 
+    def value(self):
+        """Random.value: the low 23 bits, times the float nearest 1/(2^23-1)."""
+        return _f32((self.next() & 0x7FFFFF) * 1.1920930376163765e-07)
+
+    def range_float(self, lo, hi):
+        """Random.Range(float, float), as `(1 - f) * hi + f * lo` in single
+        precision -- the order the native code rounds in."""
+        f = self.value()
+        return _f32(_f32(_f32(1.0 - f) * hi) + _f32(f * lo))
+
 
 def stable_hash(text):
     """C#'s string.GetStableHashCode, as Valheim hashes a seed name."""
@@ -151,22 +163,24 @@ def _smooth_step(lo, hi, x):
 class World:
     """One world: its offsets, and what biome is where."""
 
-    def __init__(self, seed, world_gen_version=2):
+    def __init__(self, seed, world_gen_version=2, rivers=True):
         self.seed = seed
+        self.with_rivers = rivers
+        self._rivers = None
         self.min_mountain_distance = 1000.0 if world_gen_version > 0 else 1500.0
         if world_gen_version <= 1:
             self.min_darkland_noise, self.max_marsh_distance = 0.5, 8000.0
         else:
             self.min_darkland_noise, self.max_marsh_distance = 0.4, 6000.0
         r = Random(seed)
-        # The order matters and is not obvious: four offsets, two seeds we do
-        # not need, then the fifth offset.
+        # The order matters and is not obvious: four offsets, the river and
+        # stream seeds, then the fifth offset.
         self.offset0 = float(r.range_int(-10000, 10000))
         self.offset1 = float(r.range_int(-10000, 10000))
         self.offset2 = float(r.range_int(-10000, 10000))
         self.offset3 = float(r.range_int(-10000, 10000))
-        r.range_int(-2147483648, 2147483647)      # river seed
-        r.range_int(-2147483648, 2147483647)      # stream seed
+        self.river_seed = r.range_int(-2147483648, 2147483647)
+        self.stream_seed = r.range_int(-2147483648, 2147483647)
         self.offset4 = float(r.range_int(-10000, 10000))
 
     @classmethod
@@ -292,37 +306,54 @@ class World:
         """The ground here, in metres. Sea level is 30."""
         if biome is None:
             biome, base = self.sample(wx, wy)
+        rivers = self.rivers
+        h = self._ground(wx, wy, biome, base, rivers)
+        mult = (HEIGHT_MULTIPLIER
+                * self._gap(wx, wy, ASHLANDS_Y_OFFSET)
+                * self._gap(wx, wy, DEEP_NORTH_Y_OFFSET))
+        return h * mult
+
+    def _ground(self, wx, wy, biome, base, rivers, deep_lift=0.0):
+        """Each biome's own shape, as a fraction, rivers carved in.
+
+        Every biome but Ocean carves the rivers at the same point in its
+        recipe: after its own shape, before the fine roughness.
+        """
         x = wx + 100000.0 + self.offset3
         y = wy + 100000.0 + self.offset3
+        carve = rivers.carve
 
         if biome in ("Meadows", "Plains"):
             h = base + self._detail(x, y) * 0.1
             over = h - 0.15
             if over > 0.0:                 # flatten what rises above the shore
                 h -= over * (1.0 - _clamp01(base / 0.4)) * 0.75
-            h = self._rough(x, y, h)
+            h = self._rough(x, y, carve(wx, wy, h))
         elif biome == "BlackForest":
-            h = self._rough(x, y, base + self._detail(x, y) * 0.1)
+            h = self._rough(x, y, carve(wx, wy, base + self._detail(x, y) * 0.1))
         elif biome == "Swamp":
             # Marsh ignores the base height entirely and sits at 0.137 --
             # 27.4 metres, just under the sea. It is bog, not ocean.
             mx, my = wx + 100000.0, wy + 100000.0
-            h = self._rough(mx, my, 0.137 + perlin(mx * 0.04, my * 0.04)
-                            * perlin(mx * 0.08, my * 0.08) * 0.03)
+            h = self._rough(mx, my, carve(wx, wy, 0.137 + perlin(mx * 0.04, my * 0.04)
+                                          * perlin(mx * 0.08, my * 0.08) * 0.03))
         elif biome == "Mountain":
             tilt = (abs(self.base_height(wx + 1.0, wy) - self.base_height(wx - 1.0, wy))
                     + abs(self.base_height(wx, wy - 1.0) - self.base_height(wx, wy + 1.0)))
-            h = self._rough(x, y, base + (base - 0.4) + self._detail(x, y) * 0.2)
+            h = carve(wx, wy, base + (base - 0.4) + self._detail(x, y) * 0.2)
+            h = self._rough(x, y, h)
             h += perlin(x * 0.2, y * 0.2) * 2.0 * tilt
         elif biome == "DeepNorth":
-            h = (base + max(0.0, base - 0.4) + self._detail(x, y) * 0.2) * 1.2
+            b = base + deep_lift
+            h = (b + max(0.0, b - 0.4) + self._detail(x, y) * 0.2) * 1.2
+            h = carve(wx, wy, h)
             h += perlin(x * 0.1, y * 0.1) * 0.01 + perlin(x * 0.4, y * 0.4) * 0.003
         elif biome == "Mistlands":
             n = perlin(x * 0.014, y * 0.014) * perlin(x * 0.028, y * 0.028)
             n += perlin(x * 0.021, y * 0.021) * perlin(x * 0.035, y * 0.035) * n * 0.5
             if n > 0.0:
                 n = n ** 1.5
-            h = base + n * 0.4
+            h = carve(wx, wy, base + n * 0.4)
             t = _clamp01(n * 7.0)
             h += perlin(x * 0.1, y * 0.1) * 0.03 * t
             h += perlin(x * 0.4, y * 0.4) * 0.01 * t
@@ -331,12 +362,276 @@ class World:
         elif biome == "Ocean":
             h = base
         else:                              # AshLands, to its pregenerate shape
-            h = self._rough(x, y, base + self._detail(x, y) * 0.1 + 0.1)
+            h = carve(wx, wy, self._rough(x, y, base + self._detail(x, y) * 0.1 + 0.1))
+        return h
 
-        mult = (HEIGHT_MULTIPLIER
-                * self._gap(wx, wy, ASHLANDS_Y_OFFSET)
-                * self._gap(wx, wy, DEEP_NORTH_Y_OFFSET))
-        return h * mult
+    # ---- rivers ----------------------------------------------------------
+    #
+    # The game carves rivers into the ground, and they are not in the seed's
+    # noise: they are laid out once per world, before any terrain is asked
+    # for, from two seeds of their own. Low ground is found and clustered
+    # into "lakes"; rivers join lakes; then thousands of short streams run
+    # from the shore up the hillsides. Leave this out and every river is
+    # drawn as dry land -- a sixty-to-a-hundred-metre channel, wide enough to
+    # sail, missing from the map.
+
+    @property
+    def rivers(self):
+        """The world's carved channels, laid out the first time they are
+        needed: it is a few seconds of work, and only the ground needs it."""
+        if self._rivers is None:
+            if not self.with_rivers:
+                self._rivers = _NO_RIVERS
+            else:
+                with _LAID_LOCK:
+                    if self.seed not in _LAID:
+                        _LAID[self.seed] = self._pregenerate()
+                self._rivers = _LAID[self.seed]
+        return self._rivers
+
+    def pregeneration_height(self, wx, wy, rivers, river_pregen):
+        """GetPregenerationHeight: what stream placement samples. No polar
+        gap, Mistlands as plain forest, and the Deep North lifted by a tenth
+        only on the second pass."""
+        if math.hypot(wx, wy) > WATER_EDGE:
+            return -2.0 * HEIGHT_MULTIPLIER
+        biome, base = self.sample(wx, wy)
+        if biome == "Mistlands":
+            biome = "BlackForest"
+        lift = 0.0 if river_pregen else 0.1
+        return self._ground(wx, wy, biome, base, rivers, lift) * HEIGHT_MULTIPLIER
+
+    def is_deep_north(self, wx, wy):
+        a = self.world_angle(wx, wy) * 100.0
+        return math.hypot(wx, wy + DEEP_NORTH_Y_OFFSET) > POLAR_MIN_DISTANCE + a
+
+    def _pregenerate(self):
+        rivers = Rivers()
+        lakes = self._find_lakes()
+        rng = Random(self.river_seed)
+        rivers.render(self._place_rivers(lakes, rng), rng)
+
+        # Streams are placed twice from the same seed, on ground that already
+        # has the rivers in it: once ignoring the Deep North's lift, keeping
+        # the streams that start outside it, and once with the lift, keeping
+        # the ones that start inside.
+        rng = Random(self.stream_seed)
+        streams = self._place_streams(rng, rivers, True)
+        rivers.render([s for s in streams if not self.is_deep_north(*s[0])], rng)
+        rng = Random(self.stream_seed)
+        streams = self._place_streams(rng, rivers, False)
+        rivers.render([s for s in streams if self.is_deep_north(*s[0])], rng)
+        return rivers
+
+    def _find_lakes(self):
+        """Every 128 m where the base height is under water, merged into
+        clusters 800 m across."""
+        pts = []
+        for j in range(157):
+            y = -10000.0 + j * 128.0
+            for i in range(157):
+                x = -10000.0 + i * 128.0
+                if math.hypot(x, y) <= WORLD_SIZE and self.base_height(x, y) < 0.05:
+                    pts.append((x, y))
+        return _merge_points(pts, 800.0)
+
+    def _river_allowed(self, p0, p1, step, limit):
+        """No higher than `limit` anywhere along it, and below the waterline
+        somewhere."""
+        dist = _f32(math.hypot(p1[0] - p0[0], p1[1] - p0[1]))
+        if dist <= 0.0:
+            return False
+        nx, ny = _f32((p1[0] - p0[0]) / dist), _f32((p1[1] - p0[1]) / dist)
+        dry = True
+        t = step
+        while t <= dist - step:
+            h = self.base_height(_f32(p0[0] + nx * t), _f32(p0[1] + ny * t))
+            if h > limit:
+                return False
+            if h > 0.05:
+                dry = False
+            t += step
+        return not dry
+
+    def _river_end(self, rivers, lakes, p, reach, rng):
+        joined = {(a, b) for a, b, *_ in rivers}
+        options = [i for i, q in enumerate(lakes)
+                   if q != p and math.hypot(p[0] - q[0], p[1] - q[1]) < reach
+                   and (p, q) not in joined and (q, p) not in joined
+                   and self._river_allowed(p, q, 128.0, 0.4)]
+        if not options:
+            return -1
+        return options[rng.range_int(0, len(options))]
+
+    def _place_rivers(self, lakes, rng):
+        rivers = []
+        pending = list(lakes)
+        while len(pending) > 1:
+            p = pending[0]
+            k = self._river_end(rivers, lakes, p, 2000.0, rng)
+            if k == -1 and not any(p in (a, b) for a, b, *_ in rivers):
+                k = self._river_end(rivers, lakes, p, 5000.0, rng)
+            if k == -1:
+                pending.pop(0)
+                continue
+            q = lakes[k]
+            wmax = rng.range_float(60.0, 100.0)
+            wmin = rng.range_float(60.0, wmax)
+            d = _f32(math.hypot(q[0] - p[0], q[1] - p[1]))
+            rivers.append((p, q, wmin, wmax, _f32(d / 15.0), _f32(d / 20.0)))
+        return rivers
+
+    def _place_streams(self, rng, rivers, river_pregen):
+        out = []
+        ground = self.pregeneration_height
+        steps = 100
+        shrink = _f32((200.0 - 80.0) / steps)
+        tau = _f32(math.pi * 2.0)
+        for _ in range(3000):
+            start = None
+            for _ in range(100):
+                x = rng.range_float(-10000.0, 10000.0)
+                y = rng.range_float(-10000.0, 10000.0)
+                if 26.0 < ground(x, y, rivers, river_pregen) < 31.0:
+                    start = (x, y)
+                    break
+            if start is None:
+                continue
+            end = None
+            length = 200.0
+            for _ in range(steps):
+                length = _f32(length - shrink)
+                f = rng.range_float(0.0, tau)
+                x = _f32(start[0] + _f32(math.sin(f)) * length)
+                y = _f32(start[1] + _f32(math.cos(f)) * length)
+                if 36.0 < ground(x, y, rivers, river_pregen) < 44.0:
+                    end = (x, y)
+                    break
+            if end is None:
+                continue
+            mid = ground(_f32((start[0] + end[0]) * 0.5), _f32((start[1] + end[1]) * 0.5),
+                         rivers, river_pregen)
+            if mid < 26.0 or mid > 44.0:
+                continue
+            d = _f32(math.hypot(end[0] - start[0], end[1] - start[1]))
+            out.append((start, end, 20.0, 20.0, _f32(d / 15.0), _f32(d / 20.0)))
+        return out
+
+
+def _f32(v):
+    """The nearest single-precision float, which is what the game holds."""
+    return _F32.unpack(_F32.pack(v))[0]
+
+
+_F32 = struct.Struct("<f")
+
+
+def _merge_points(points, reach):
+    """Absorb the nearest point within reach into the cluster, averaging,
+    until none is left in reach; then start the next cluster."""
+    points = list(points)
+    out = []
+    while points:
+        p = points.pop(0)
+        while True:
+            best, best_d = -1, 99999.0
+            for i, q in enumerate(points):
+                if q != p:
+                    d = math.hypot(p[0] - q[0], p[1] - q[1])
+                    if d < reach and d < best_d:
+                        best, best_d = i, d
+            if best == -1:
+                break
+            q = points[best]
+            p = (_f32((p[0] + q[0]) * 0.5), _f32((p[1] + q[1]) * 0.5))
+            points[best] = points[-1]
+            points.pop()
+        out.append(p)
+    return out
+
+
+class Rivers:
+    """River and stream centrelines, as points with a radius, filed in a
+    64 m grid so a height only looks at the handful near it."""
+
+    def __init__(self):
+        self.grid = {}
+
+    @staticmethod
+    def _cell(v):
+        return math.floor((v + 32.0) / 64.0)
+
+    def add(self, x, y, r):
+        gx, gy = self._cell(x), self._cell(y)
+        span = math.ceil(r / 64.0)
+        point = (x, y, r, r * r)
+        for i in range(gy - span, gy + span + 1):
+            for j in range(gx - span, gx + span + 1):
+                if abs(x - j * 64.0) < r + 32.0 and abs(y - i * 64.0) < r + 32.0:
+                    self.grid.setdefault((j, i), []).append(point)
+
+    def render(self, rivers, rng):
+        """Each centreline meanders on three sines, sampled every eighth of
+        its narrowest width, each sample a random width of its own -- which
+        is what makes the banks wobble."""
+        for p0, p1, wmin, wmax, curve_width, wavelength in rivers:
+            step = _f32(wmin / 8.0)
+            dx, dy = _f32(p1[0] - p0[0]), _f32(p1[1] - p0[1])
+            dist = _f32(math.hypot(dx, dy))
+            if dist <= 0.0 or step <= 0.0:
+                continue
+            nx, ny = _f32(dx / dist), _f32(dy / dist)
+            t = 0.0
+            while t <= dist:
+                a = _f32(t / wavelength)
+                off = _f32(math.sin(a) * math.sin(a * 0.634119987487793)
+                           * math.sin(a * 0.3341200053691864) * curve_width)
+                r = rng.range_float(wmin, wmax)
+                self.add(_f32(p0[0] + nx * t - ny * off),
+                         _f32(p0[1] + ny * t + nx * off), r)
+                t = _f32(t + step)
+
+    def weight(self, wx, wy):
+        """How deep in a channel this is, 0 at the bank to 1 on its line,
+        and the channel's width there."""
+        points = self.grid.get((self._cell(wx), self._cell(wy)))
+        if not points:
+            return 0.0, 0.0
+        best = acc_w = acc_t = 0.0
+        for x, y, r, r2 in points:
+            dx, dy = x - wx, y - wy
+            d2 = dx * dx + dy * dy
+            if d2 < r2:
+                t = 1.0 - math.sqrt(d2) / r
+                if t > best:
+                    best = t
+                acc_w += r * t
+                acc_t += t
+        return best, (acc_w / acc_t if acc_t > 0.0 else 0.0)
+
+    def carve(self, wx, wy, h):
+        """AddRivers: pull the ground down to a riverbed just under the sea,
+        wider rivers deeper."""
+        if not self.grid:
+            return h
+        weight, width = self.weight(wx, wy)
+        if weight <= 0.0:
+            return h
+        t = _lerp_step(20.0, 60.0, width)
+        bed = _lerp(t, 0.14, 0.12)
+        bank = _lerp(t, 0.139, 0.128)
+        if h > bed:
+            h = _lerp(weight, h, bed)
+        if h > bank:
+            h = _lerp(_lerp_step(0.85, 1.0, weight), h, bank)
+        return h
+
+
+_NO_RIVERS = Rivers()
+# seed -> Rivers. Laying them out is seconds of work and the answer never
+# changes, and the drawing and the hover lookup each make their own World.
+_LAID = {}
+_LAID_LOCK = threading.Lock()
 
 
 # What each biome looks like. Chosen to read at a glance rather than to
@@ -359,12 +654,18 @@ MAP_SPAN = 2048 * 12 / 2
 # Bumped whenever the drawing changes. A seed's terrain cannot change, but
 # our rendering of it can, and the cache is keyed on the seed -- so without
 # this a fix reaches nobody who already has the old picture on disk. It went
-# to 2 with the biome colours; it stays 2 so the drawings already made of
-# that version are kept.
-MODEL = 2
+# to 2 with the biome colours, and to 3 when the rivers were carved in.
+MODEL = 3
 
 HEIGHT_MULTIPLIER = 200.0
 SEA_LEVEL = 30.0
+# Where the drawing puts the water's edge: two and a half metres under the
+# sea, not at it. Measured, not derived -- the game's own map, laid over our
+# heights on a real world, draws water below 27-28 m in every biome and
+# land above, and 27.5 disagrees with it least. It is also what lets a
+# swamp be bog without a rule of its own: marsh ground sits around 27-33 m
+# and reads as land, while a river cut through it, at 24-26, reads as water.
+WATERLINE = 27.5
 
 def _mix(a, b, t):
     """`a` at t=0, `b` at t=1."""
@@ -439,10 +740,12 @@ def heights(world, size=2048, progress=None):
     return hs, biomes
 
 
-def topo_rows(hs, biomes, size):
-    """Raw PNG scanlines for the topographic drawing of these heights."""
-    swamp = BIOMES.index("Swamp")
-    marsh = bytes(b == swamp for b in biomes)
+def topo_rows(hs, biomes, size, metres=None):
+    """Raw PNG scanlines for the topographic drawing of these heights.
+
+    `metres` is the ground one pixel covers, if it is not the whole map
+    drawn `size` pixels square.
+    """
     # Each biome's colour from the shore to HIGH, worked out once.
     tints = [(_mix(COLOURS[b], (0, 0, 0), 0.18),
               _mix(COLOURS[b], (255, 255, 255), 0.22)) for b in BIOMES]
@@ -450,7 +753,7 @@ def topo_rows(hs, biomes, size):
     # relief map uses, and the one that makes hills read as hills rather
     # than as valleys.
     lx, ly, lz = -0.5, 0.5, math.sqrt(0.5)
-    metres = PIXEL_METRES * (2048 / size)
+    metres = metres or PIXEL_METRES * (2048 / size)
     rows = bytearray()
     last = size - 1
     for j in range(size):
@@ -468,20 +771,12 @@ def topo_rows(hs, biomes, size):
             shade = (nx * lx + ny * ly + lz) / math.sqrt(nx * nx + ny * ny + 1.0)
             light = min(1.25, max(0.3, 0.3 + 0.7 * shade / lz))
 
-            bog = marsh[row + i]
-            # Marsh sits a little under the sea by construction; it is bog,
-            # not water, as the biome map also has it.
-            lift = SEA_LEVEL + 0.5 if bog else -1e9
-            a = max(h, lift) - SEA_LEVEL
-            r = max(east, lift if marsh[row + min(i + 1, last)] else -1e9) - SEA_LEVEL
-            d = max(hs[below + i], lift if marsh[below + i] else -1e9) - SEA_LEVEL
+            a = h - WATERLINE
+            r = east - WATERLINE
+            d = hs[below + i] - WATERLINE
             # The coast is drawn on the land, whichever side the sea is on,
             # so it looks to all four neighbours and not just two.
-            wet = a >= 0.0 and not bog and min(
-                west, hs[up + i], east, hs[below + i]) < SEA_LEVEL and any(
-                hs[k] < SEA_LEVEL and not marsh[k]
-                for k in (row + max(i - 1, 0), up + i,
-                          row + min(i + 1, last), below + i))
+            wet = a >= 0.0 and min(west, hs[up + i], east, hs[below + i]) < WATERLINE
 
             if a < 0.0:
                 colour = _ramp(SEA_RAMP, -a)
